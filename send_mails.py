@@ -103,7 +103,7 @@ def route_for(row: dict[str, str]) -> tuple[str, str]:
         city = (row.get("sehir") or "").casefold()
         return ("QA" if "qatar" in city else "AE"), "en"
     # Turkiye ici basvurular: tasinma yok, mesaj Turkce
-    if tag == "TR-YARD":
+    if tag in {"TR-YARD", "TR-INSAAT"}:
         return "TR", "tr-yerel"
     # kruvaziyer: gemide finans pozisyonu, ayri Ingilizce mesaj
     if tag == "CRUISE-EN":
@@ -246,6 +246,14 @@ def _sector_line(row: dict[str, str]) -> str:
         return ("Tersane ve denizcilik tarafında ihracat, döviz bazlı maliyet takibi ve "
                 "yabancı müşteriyle yazışma öne çıkıyor; İngilizcem C1 ve raporlama "
                 "tarafında rahatım, bu yüzden özellikle sizin sektörünüze başvuruyorum.")
+    if tag == "TR-INSAAT":
+        return ("Daha önce BL Harbert International'da uluslararası bir inşaat projesinin "
+                "muhasebesinde çalıştım: cari hesaplar, döviz hesaplamaları ve GAAP'e uygun "
+                "ay sonu kapanışları. Orada asıl fark yarattığım nokta şuydu: saha ile merkez "
+                "arasındaki veri birleştirme işini VBA ile otomatikleştirip haftada yaklaşık "
+                "9 saatlik tekrar eden işi ortadan kaldırdım. Yurt dışı proje muhasebesinde "
+                "raporlamanın nerede tıkandığını biliyorum ve o tıkanıklığı açan taraf benim "
+                "güçlü olduğum yer; yurt dışı görevlendirmeye de açığım.")
     return ("Şirketinizin finans süreçlerine hem günlük muhasebe işinde hem de "
             "raporlama tarafında katkı verebileceğimi düşünüyorum.")
 
