@@ -1,0 +1,16 @@
+# Kampanya verisi asla repoya girmez (firma iletisim bilgileri, gonderim kaydi)
+firmalar.csv
+sent-log.csv
+exclusions.csv
+delivery-state.sqlite3
+delivery-state.sqlite3-*
+*.log
+*.pdf
+*.bak
+.delivery.lock
+.send.lock
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/

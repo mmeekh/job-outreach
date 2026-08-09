@@ -1,0 +1,15 @@
+SUBJECT: Open application: a finance professional who'd love to join your team
+
+Dear {firm} team,
+
+A small confession first: this email was sent by a little system I built myself. Not because I'm selling automation, but because it felt like the most honest way to introduce myself.
+
+I'm Emin, an economics graduate with about 3 years in accounting and reporting (accounts payable, month-end closings, Power BI). I'm planning to move to {country_target}, and I'd love to find my place inside a team like yours in {city}. I enjoy the day-to-day accounting work itself, and along the way I like speeding up the repetitive parts with Excel/VBA and Python.
+
+Would you have room for someone like me, now or in the coming months? My CV is attached, and I'm happy to jump on a short call anytime.
+
+Kind regards,
+Emin Kilic
++90 552 942 88 39
+LinkedIn: https://www.linkedin.com/in/emin-kilic-dd58gr9cd
+GitHub: https://github.com/mmeekh

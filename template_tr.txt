@@ -1,0 +1,15 @@
+SUBJECT: İş başvurusu: ekibinize katılmak isteyen bir finansçı
+
+Merhaba {firm} ekibi,
+
+Önce küçük bir itiraf: bu e-postayı benim kurduğum minik bir sistem gönderdi. Otomasyon satmaya çalıştığımdan değil, kendimi tanıtmanın en dürüst yolu bu olduğu için.
+
+Ben Emin; ekonomi mezunuyum, yaklaşık 3 yıl muhasebe ve raporlama deneyimim var (cari hesaplar, ay sonu kapanışları, Power BI). {country_target} yerleşmeyi planlıyorum ve {city_loc} sizinki gibi bir ekibin içinde tam zamanlı çalışmak istiyorum. Günlük muhasebe işini severek yaparım, tekrar eden kısımları da Excel/VBA ve Python ile hızlandırırım.
+
+Ekibinizde bana uygun bir yer olur mu, şimdi ya da önümüzdeki aylarda? CV'm ekte; kısa bir görüşmeye her zaman açığım.
+
+Saygılarımla,
+Emin Kılıç
++90 552 942 88 39
+LinkedIn: https://www.linkedin.com/in/emin-kilic-dd58gr9cd
+GitHub: https://github.com/mmeekh
