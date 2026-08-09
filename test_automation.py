@@ -51,9 +51,12 @@ class RoutingAndDataTests(unittest.TestCase):
             self.assertIn(send_mails.GITHUB_URL, body)
             if country != "NL":
                 self.assertNotEqual(language, "nl")
-                lowered = f"{subject}\n{body}".casefold()
+                # Hollandaca kontrolu SABLONDA yapilir: alici firmanin adinda
+                # "boekhouding" gecmesi mesajin Hollandaca oldugunu gostermez.
+                sablon_konu, sablon_govde = send_mails.load_template(language)
+                sablon = f"{sablon_konu}\n{sablon_govde}".casefold()
                 for marker in send_mails.NON_NL_FORBIDDEN:
-                    self.assertNotIn(marker, lowered, row["email"])
+                    self.assertNotIn(marker, sablon, row["email"])
 
     def test_every_active_row_is_routed_to_an_allowed_language(self):
         """Avrupa/Korfez kollari Ingilizce; Turkiye ve kruvaziyer kollari kendi

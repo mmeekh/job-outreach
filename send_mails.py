@@ -270,6 +270,9 @@ def render_for(row: dict[str, str]) -> tuple[str, str, str, str]:
         "{country_target}": target,
         "{sector_line}": _sector_line(row),
     }
+    # Hollandaca sizinti kontrolu SABLON metninde yapilir; firma adinda
+    # "boekhouding" gecmesi mesajin Hollandaca oldugu anlamina gelmez.
+    sablon_metni = f"{subject}\n{body}".casefold()
     for marker, value in replacements.items():
         subject = subject.replace(marker, value)
         body = body.replace(marker, value)
@@ -283,8 +286,7 @@ def render_for(row: dict[str, str]) -> tuple[str, str, str, str]:
     if country not in {"TR", "CRUISE"} and language != "en":
         raise ValueError("kampanya politikasi geregi tum mesajlar Ingilizce olmali")
     if country not in {"NL", "TR"}:
-        lowered = f"{subject}\n{body}".casefold()
-        found = [marker for marker in NON_NL_FORBIDDEN if marker in lowered]
+        found = [marker for marker in NON_NL_FORBIDDEN if marker in sablon_metni]
         if found:
             raise ValueError(f"Hollanda disi mesajda Hollandaca ifade bulundu: {found}")
     return subject, body, country, language
