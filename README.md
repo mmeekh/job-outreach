@@ -1,5 +1,7 @@
 # Job Application Outreach
 
+![A queue of messages passes through a locked checkpoint that deflects duplicates, so each destination receives exactly one](docs/banner.png)
+
 A personal outreach system for a multi-country job search: it renders a tailored application email per company, attaches a CV, and delivers it under strict guarantees — **no recipient is ever contacted twice**, even across crashes, restarts, or concurrent runs.
 
 Built because sending a few hundred applications by hand is slow, and sending them naively is worse: a duplicate application reads as spam and costs you the opportunity.
