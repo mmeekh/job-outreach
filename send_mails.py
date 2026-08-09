@@ -102,6 +102,12 @@ def route_for(row: dict[str, str]) -> tuple[str, str]:
     if tag in {"GULF-EN", "GULF-TURK"}:
         city = (row.get("sehir") or "").casefold()
         return ("QA" if "qatar" in city else "AE"), "en"
+    # Turkiye ici basvurular: tasinma yok, mesaj Turkce
+    if tag == "TR-YARD":
+        return "TR", "tr-yerel"
+    # kruvaziyer: gemide finans pozisyonu, ayri Ingilizce mesaj
+    if tag == "CRUISE-EN":
+        return "CRUISE", "en-cruise"
     raise ValueError(f"bilinmeyen veya guvensiz rota: {tag!r}")
 
 
@@ -152,7 +158,13 @@ def load_rows() -> list[dict[str, str]]:
 
 
 def load_template(language: str) -> tuple[str, str]:
-    path = BASE / {"en": "template_en.txt", "tr": "template_tr.txt", "nl": "template_nl.txt"}[language]
+    path = BASE / {
+        "en": "template_en.txt",
+        "tr": "template_tr.txt",
+        "nl": "template_nl.txt",
+        "tr-yerel": "template_tr_yerel.txt",
+        "en-cruise": "template_cruise.txt",
+    }[language]
     raw = path.read_text(encoding="utf-8")
     first, separator, body = raw.partition("\n")
     if not separator or not first.startswith("SUBJECT:"):
@@ -200,6 +212,8 @@ def _country_target(country: str, language: str) -> str:
         ("AE", "tr"): "Birleşik Arap Emirlikleri'ne",
         ("QA", "en"): "Qatar",
         ("QA", "tr"): "Katar'a",
+        ("TR", "tr-yerel"): "Türkiye",
+        ("CRUISE", "en-cruise"): "your fleet",
     }
     try:
         return values[(country, language)]
@@ -225,6 +239,17 @@ def _tr_locative(city: str) -> str:
     return f"{city}'{suffix}"
 
 
+def _sector_line(row: dict[str, str]) -> str:
+    """Turkce yerel sablondaki sektore ozel cumle."""
+    tag = (row.get("oncelik") or "").strip().upper()
+    if tag == "TR-YARD":
+        return ("Tersane ve denizcilik tarafında ihracat, döviz bazlı maliyet takibi ve "
+                "yabancı müşteriyle yazışma öne çıkıyor; İngilizcem C1 ve raporlama "
+                "tarafında rahatım, bu yüzden özellikle sizin sektörünüze başvuruyorum.")
+    return ("Şirketinizin finans süreçlerine hem günlük muhasebe işinde hem de "
+            "raporlama tarafında katkı verebileceğimi düşünüyorum.")
+
+
 def render_for(row: dict[str, str]) -> tuple[str, str, str, str]:
     country, language = route_for(row)
     subject, body = load_template(language)
@@ -235,6 +260,7 @@ def render_for(row: dict[str, str]) -> tuple[str, str, str, str]:
         "{city}": city,
         "{city_loc}": _tr_locative(city),
         "{country_target}": target,
+        "{sector_line}": _sector_line(row),
     }
     for marker, value in replacements.items():
         subject = subject.replace(marker, value)
@@ -244,9 +270,11 @@ def render_for(row: dict[str, str]) -> tuple[str, str, str, str]:
         raise ValueError(f"sablonda doldurulmamis alan kaldi: {leftovers}")
     if LINKEDIN_URL not in body or GITHUB_URL not in body:
         raise ValueError("LinkedIn/GitHub HTTPS linkleri sablonda eksik")
-    if language != "en":
+    # Avrupa/Korfez kampanyasi tamamen Ingilizce; Turkiye ve kruvaziyer kollari
+    # kendi sablonlarini kullanir (TR yerel Turkce, kruvaziyer ayri Ingilizce).
+    if country not in {"TR", "CRUISE"} and language != "en":
         raise ValueError("kampanya politikasi geregi tum mesajlar Ingilizce olmali")
-    if country != "NL":
+    if country not in {"NL", "TR"}:
         lowered = f"{subject}\n{body}".casefold()
         found = [marker for marker in NON_NL_FORBIDDEN if marker in lowered]
         if found:

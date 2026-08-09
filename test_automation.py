@@ -55,12 +55,15 @@ class RoutingAndDataTests(unittest.TestCase):
                 for marker in send_mails.NON_NL_FORBIDDEN:
                     self.assertNotIn(marker, lowered, row["email"])
 
-    def test_every_active_row_is_routed_to_english(self):
+    def test_every_active_row_is_routed_to_an_allowed_language(self):
+        """Avrupa/Korfez kollari Ingilizce; Turkiye ve kruvaziyer kollari kendi
+        sablonlarini kullanir. Baska hicbir kombinasyona izin verilmez."""
+        allowed = {"TR": "tr-yerel", "CRUISE": "en-cruise"}
         rows = send_mails.load_rows()
         for row in rows:
             country, language = send_mails.route_for(row)
             self.assertTrue(country)
-            self.assertEqual(language, "en")
+            self.assertEqual(language, allowed.get(country, "en"), row["email"])
 
     def test_unknown_route_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "bilinmeyen"):
