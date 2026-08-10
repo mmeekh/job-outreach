@@ -47,8 +47,8 @@ PASSWORD_PATH = Path(os.environ.get(
 
 LINKEDIN_URL = "https://www.linkedin.com/in/emin-kilic-dd58gr9cd"
 GITHUB_URL = "https://github.com/mmeekh"
-# 400 mail 9 saatlik pencereye sigmali: ortalama gecikme <= 81sn olmali
-MIN_DELAY, MAX_DELAY = 40, 110
+# 450 mail 9 saatlik pencereye sigmali: ortalama gecikme <= 72sn olmali
+MIN_DELAY, MAX_DELAY = 35, 100
 
 NON_NL_FORBIDDEN = (
     "open sollicitatie",

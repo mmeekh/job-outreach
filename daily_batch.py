@@ -22,7 +22,7 @@ from send_mails import (
     send_row,
 )
 
-DAILY_LIMIT = 400
+DAILY_LIMIT = 450
 SEND_TIMEZONE = ZoneInfo("Europe/Istanbul")
 SEND_START_HOUR = 9
 SEND_END_HOUR = 18
