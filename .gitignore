@@ -4,13 +4,46 @@ sent-log.csv
 exclusions.csv
 delivery-state.sqlite3
 delivery-state.sqlite3-*
+outreach-outcomes.sqlite3
+outreach-outcomes.sqlite3-*
 *.log
 *.pdf
 *.bak
 .delivery.lock
 .send.lock
+archive/
+runtime/
+.firmalar.csv.*
+auto-publish-accepted-*.csv
+auto-publish-rejected-*.csv
+candidates-*.csv
+new-contacts-*.csv
+research-import-*.csv
+firmalar.csv.bak-*
+personalizations*.csv
+personalizations*.md
 
 # Python
 __pycache__/
 *.py[cod]
 .venv/
+
+# --- PII / campaign-data guard (added 2026-08-26) ---
+# The policy at the top of this file already says campaign data must never enter
+# the repo, but the patterns enforcing it were incomplete: research-exclude.csv
+# (1575 real contact email addresses) and the followup-state.sqlite3 family were
+# untracked AND unignored, so a single  would have published them.
+# Generalised from literal filenames to patterns so new files are covered too.
+*.sqlite3
+*.sqlite3-*
+*-exclude.csv
+research-exclude.csv
+personalizations*.csv
+
+# --- blanket CSV guard (added 2026-08-26) ---
+# The rules above name specific files. This repo holds 1575 real contact records,
+# so a NEW export under an unanticipated name would still be committable.
+# Deny all CSV by default; allow back only the vetted public-domain blocklist.
+*.csv
+*.CSV
+!enterprise-exclusions.csv
