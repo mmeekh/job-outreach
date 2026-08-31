@@ -166,7 +166,7 @@ def _subject(row: dict[str, str]) -> str:
 
 def generate(row: dict[str, str]) -> tuple[str, str]:
     company = row["firma"].strip()
-    body = f"""Dear {company} team,
+    body = f"""Dear {company},
 
 I am writing to apply for a full-time position in finance or administration at {company}.
 

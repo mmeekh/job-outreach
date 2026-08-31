@@ -64,7 +64,7 @@ class RoutingAndDataTests(unittest.TestCase):
     def test_personalized_snapshot_is_used_for_verified_queue_rows(self):
         row = sample_row(email="personalized@example.test")
         body = (
-            "Dear Example Finance team,\n\nI am writing to apply for a full-time position "
+            "Dear Example Finance,\n\nI am writing to apply for a full-time position "
             "in finance or administration at Example Finance.\n\n"
             "Your reporting platform caught my attention. I work with Power BI daily.\n\n"
             "Kind regards,\nEmin Kilic\n"
