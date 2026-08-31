@@ -29,19 +29,29 @@ from email.utils import formataddr
 from pathlib import Path
 from urllib.parse import urlparse
 
+from project_paths import LOCK_DIR
+
 BASE = Path(__file__).resolve().parent
 # Kimlik ve sir yolu ortam degiskeniyle degistirilebilir; verilmezse mevcut
 # kurulumun degerleri kullanilir (calisan cron bozulmasin diye).
 EMAIL = os.environ.get("OUTREACH_EMAIL", "muhammeteminkilic012@gmail.com")
 DISPLAY_NAME = os.environ.get("OUTREACH_NAME", "Emin Kilic")
 CAMPAIGN_ID = "emin-job-outreach-2026-08"
+ENGLISH_SUBJECT = "Open application: finance and administration role at {firm}"
 
-CV_PATH = BASE / "001-Emin-Kilic-CV.pdf"
+CV_PATH = BASE / "Emin_Kilic_CV_EN.pdf"
 CSV_PATH = BASE / "firmalar.csv"
 EXCLUSIONS_PATH = BASE / "exclusions.csv"
+ENTERPRISE_EXCLUSIONS_PATH = BASE / "enterprise-exclusions.csv"
 LOG_PATH = BASE / "sent-log.csv"
 STATE_PATH = BASE / "delivery-state.sqlite3"
-LOCK_PATH = BASE / ".delivery.lock"
+LOCK_PATH = LOCK_DIR / "delivery.lock"
+QUEUE_LOCK_PATH = LOCK_DIR / "queue.lock"
+PERSONALIZATIONS_PATH = Path(os.environ.get(
+    "OUTREACH_PERSONALIZATIONS_FILE", str(BASE / "personalizations.csv")))
+REQUIRE_PERSONALIZED = os.environ.get("OUTREACH_REQUIRE_PERSONALIZED", "0") == "1"
+_PERSONALIZATION_CACHE_KEY: tuple[str, int, int] | None = None
+_PERSONALIZATION_CACHE: dict[str, dict[str, str]] = {}
 PASSWORD_PATH = Path(os.environ.get(
     "OUTREACH_PASSWORD_FILE", "/root/secrets/gmail-emin-app-password.txt"))
 
@@ -72,6 +82,34 @@ def normalize_email(value: str) -> str:
     return (value or "").strip().casefold()
 
 
+RECIPIENT_EMAIL_RE = re.compile(
+    r"^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?"
+    r"(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+$",
+    re.IGNORECASE,
+)
+
+
+def is_valid_recipient_email(value: str) -> bool:
+    """Reject scraper URL fragments and malformed mailbox values fail-closed."""
+    candidate = (value or "").strip()
+    return bool(
+        candidate
+        and len(candidate) <= 254
+        and "/" not in candidate
+        and "\\" not in candidate
+        and not any(character.isspace() for character in candidate)
+        and RECIPIENT_EMAIL_RE.fullmatch(candidate)
+    )
+
+
+def english_subject_for(firm: str) -> str:
+    """The approved subject is direct, but remains specific to the employer."""
+    company = (firm or "").strip()
+    if not company:
+        raise ValueError("subject icin firma adi gerekli")
+    return ENGLISH_SUBJECT.replace("{firm}", company)
+
+
 def route_for(row: dict[str, str]) -> tuple[str, str]:
     tag = (row.get("oncelik") or "").strip().upper()
     # Campaign policy: every recipient gets English, regardless of legacy tag.
@@ -95,19 +133,21 @@ def route_for(row: dict[str, str]) -> tuple[str, str]:
         return "NO", "en"
     # scraper ile eklenen ulkeler: "<ULKE>-EN" kalibi
     generic = {"BG", "RO", "CZ", "SK", "HU", "HR", "SI", "EE", "LV", "LT",
-               "PT", "ES", "IT", "GR", "CY", "FI", "AT", "BE", "CH", "TH", "VN",
-               "NL", "DE", "PL", "IE", "SE", "DK", "LU", "MT", "NO", "EU"}
+               "PT", "ES", "IT", "GR", "FI", "AT", "BE", "CH", "TH", "VN",
+               "NL", "DE", "PL", "IE", "SE", "DK", "LU", "MT", "NO", "GB", "CA", "NZ",
+               "AU", "SG", "AE", "QA",
+               "EU"}
     if tag.endswith("-EN") and tag[:-3] in generic:
         return tag[:-3], "en"
     if tag in {"GULF-EN", "GULF-TURK"}:
         city = (row.get("sehir") or "").casefold()
         return ("QA" if "qatar" in city else "AE"), "en"
-    # Turkiye ici basvurular: tasinma yok, mesaj Turkce
+    # Bu iki kol da artik ortak Ingilizce sablonu kullaniyor; kendi sablonlari
+    # kaldirildi. Ikisinde de gonderilmemis kayit yok.
     if tag in {"TR-YARD", "TR-INSAAT"}:
-        return "TR", "tr-yerel"
-    # kruvaziyer: gemide finans pozisyonu, ayri Ingilizce mesaj
+        return "TR", "en"
     if tag == "CRUISE-EN":
-        return "CRUISE", "en-cruise"
+        return "CRUISE", "en"
     raise ValueError(f"bilinmeyen veya guvensiz rota: {tag!r}")
 
 
@@ -131,6 +171,25 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def enterprise_exclusion_reason(row: dict[str, str]) -> str | None:
+    """Return the recorded reason for a deliberately skipped enterprise domain."""
+    if not ENTERPRISE_EXCLUSIONS_PATH.exists():
+        return None
+    site = _site_host(row)
+    firm_words = set(re.findall(r"[a-z0-9]+", (row.get("firma") or "").casefold()))
+    for excluded in _read_csv(ENTERPRISE_EXCLUSIONS_PATH):
+        domain = (excluded.get("domain") or "").strip().casefold().removeprefix("www.")
+        brand = re.sub(r"[^a-z0-9]+", "", (excluded.get("brand") or "").casefold())
+        if domain and (site == domain or site.endswith("." + domain)):
+            return (excluded.get("reason") or "enterprise employer").strip()
+        # Some multinational employers route local offices through a country
+        # domain (for example bain.uk). Only an explicit configured brand can
+        # use the company-field fallback; never infer one from a short domain.
+        if len(brand) >= 4 and brand in firm_words:
+            return (excluded.get("reason") or "enterprise employer").strip()
+    return None
+
+
 def load_rows() -> list[dict[str, str]]:
     """Return the reviewed active queue; fail closed on inconsistent data."""
     if not CSV_PATH.exists() or not EXCLUSIONS_PATH.exists():
@@ -143,6 +202,8 @@ def load_rows() -> list[dict[str, str]]:
     rows = [
         row for row in _read_csv(CSV_PATH)
         if normalize_email(row.get("email", "")) not in excluded
+        and is_valid_recipient_email(row.get("email", ""))
+        and not enterprise_exclusion_reason(row)
     ]
     emails = [normalize_email(row.get("email", "")) for row in rows]
     if not all(emails):
@@ -157,19 +218,48 @@ def load_rows() -> list[dict[str, str]]:
     return rows
 
 
+def has_turkish_company_priority(row: dict[str, str]) -> bool:
+    """Return true only for evidence-tagged companies; never infer from names."""
+    return "turkish-company-priority" in (row.get("dil_notu") or "").casefold()
+
+
 def load_template(language: str) -> tuple[str, str]:
-    path = BASE / {
-        "en": "template_en.txt",
-        "tr": "template_tr.txt",
-        "nl": "template_nl.txt",
-        "tr-yerel": "template_tr_yerel.txt",
-        "en-cruise": "template_cruise.txt",
-    }[language]
+    # Kampanyanin tek sablonu Ingilizce. Turkce, Hollandaca, TR-yerel ve
+    # kruvaziyer sablonlari 31 Agu 2026'da kaldirildi: dosyalari zaten silinmisti
+    # ve preflight her satiri render ettigi icin coktan gonderilmis TR satirlari
+    # yuzunden butun kuyruk patliyordu.
+    if language != "en":
+        raise ValueError(f"desteklenmeyen sablon dili: {language}")
+    path = BASE / "template_en.txt"
     raw = path.read_text(encoding="utf-8")
     first, separator, body = raw.partition("\n")
     if not separator or not first.startswith("SUBJECT:"):
         raise ValueError(f"gecersiz sablon: {path.name}")
     return first.removeprefix("SUBJECT:").strip(), body.strip() + "\n"
+
+
+def load_personalizations() -> dict[str, dict[str, str]]:
+    global _PERSONALIZATION_CACHE_KEY, _PERSONALIZATION_CACHE
+    if not PERSONALIZATIONS_PATH.exists():
+        _PERSONALIZATION_CACHE_KEY = None
+        _PERSONALIZATION_CACHE = {}
+        return {}
+    stat = PERSONALIZATIONS_PATH.stat()
+    cache_key = (str(PERSONALIZATIONS_PATH), stat.st_mtime_ns, stat.st_size)
+    if cache_key == _PERSONALIZATION_CACHE_KEY:
+        return _PERSONALIZATION_CACHE
+    rows = _read_csv(PERSONALIZATIONS_PATH)
+    result: dict[str, dict[str, str]] = {}
+    for row in rows:
+        key = normalize_email(row.get("email", ""))
+        if not key or not row.get("subject") or not row.get("body"):
+            raise ValueError("personalizations.csv icinde eksik kayit var")
+        if key in result:
+            raise ValueError(f"duplicate personalization: {key}")
+        result[key] = row
+    _PERSONALIZATION_CACHE_KEY = cache_key
+    _PERSONALIZATION_CACHE = result
+    return result
 
 
 def _country_target(country: str, language: str) -> str:
@@ -199,8 +289,12 @@ def _country_target(country: str, language: str) -> str:
         ("PT", "en"): "Portugal",
         ("ES", "en"): "Spain",
         ("IT", "en"): "Italy",
+        ("GB", "en"): "the United Kingdom",
+        ("CA", "en"): "Canada",
+        ("NZ", "en"): "New Zealand",
+        ("AU", "en"): "Australia",
+        ("SG", "en"): "Singapore",
         ("GR", "en"): "Greece",
-        ("CY", "en"): "Cyprus",
         ("FI", "en"): "Finland",
         ("AT", "en"): "Austria",
         ("BE", "en"): "Belgium",
@@ -212,8 +306,8 @@ def _country_target(country: str, language: str) -> str:
         ("AE", "tr"): "Birleşik Arap Emirlikleri'ne",
         ("QA", "en"): "Qatar",
         ("QA", "tr"): "Katar'a",
-        ("TR", "tr-yerel"): "Türkiye",
-        ("CRUISE", "en-cruise"): "your fleet",
+        ("TR", "en"): "Türkiye",
+        ("CRUISE", "en"): "your fleet",
     }
     try:
         return values[(country, language)]
@@ -224,7 +318,7 @@ def _country_target(country: str, language: str) -> str:
 def _clean_city(value: str, country_target: str) -> str:
     city = re.sub(r"\s*\([^)]*\)\s*$", "", value or "")
     city = city.split("/")[0].split(",")[0].strip()
-    placeholders = {"", "multiple", "nationwide", "remote", "europe", "netherlands", "germany", "poland", "ireland", "uae", "qatar"}
+    placeholders = {"", "multiple", "nationwide", "remote", "europe", "netherlands", "germany", "poland", "ireland", "united kingdom", "canada", "new zealand", "uae", "qatar"}
     return country_target if city.casefold() in placeholders else city
 
 
@@ -260,7 +354,24 @@ def _sector_line(row: dict[str, str]) -> str:
 
 def render_for(row: dict[str, str]) -> tuple[str, str, str, str]:
     country, language = route_for(row)
-    subject, body = load_template(language)
+    if language == "en":
+        personalized = load_personalizations().get(normalize_email(row.get("email", "")))
+        requires_personalization = "personalized-required" in (row.get("dil_notu") or "").casefold()
+        if requires_personalization and personalized is None:
+            raise ValueError("scraper kaydi icin kanitli kisisellestirme eksik")
+        if (personalized is not None and requires_personalization
+                and personalized.get("subject", "") == english_subject_for(row.get("firma", ""))):
+            if personalized.get("firma", "").strip() != row.get("firma", "").strip():
+                raise ValueError("kisisellestirme firma adi ile kuyruk eslesmiyor")
+            subject, body = personalized["subject"], personalized["body"]
+        else:
+            # Existing queue rows may have an immutable snapshot generated with
+            # a retired subject.  They receive the current controlled template;
+            # newly published scraper rows cannot reach this branch because the
+            # publisher validates the current subject before it writes them.
+            subject, body = load_template("en")
+    else:
+        subject, body = load_template(language)
     target = _country_target(country, language)
     city = _clean_city(row.get("sehir", ""), target)
     replacements = {
@@ -281,6 +392,8 @@ def render_for(row: dict[str, str]) -> tuple[str, str, str, str]:
         raise ValueError(f"sablonda doldurulmamis alan kaldi: {leftovers}")
     if LINKEDIN_URL not in body or GITHUB_URL not in body:
         raise ValueError("LinkedIn/GitHub HTTPS linkleri sablonda eksik")
+    if language == "en" and subject != english_subject_for(row.get("firma", "")):
+        raise ValueError("Ingilizce konu satiri kullanici onayli metinle ayni olmali")
     # Avrupa/Korfez kampanyasi tamamen Ingilizce; Turkiye ve kruvaziyer kollari
     # kendi sablonlarini kullanir (TR yerel Turkce, kruvaziyer ayri Ingilizce).
     if country not in {"TR", "CRUISE"} and language != "en":
@@ -289,6 +402,28 @@ def render_for(row: dict[str, str]) -> tuple[str, str, str, str]:
         found = [marker for marker in NON_NL_FORBIDDEN if marker in sablon_metni]
         if found:
             raise ValueError(f"Hollanda disi mesajda Hollandaca ifade bulundu: {found}")
+    if language == "en":
+        body_folded = body.casefold()
+        relocation_intent = (
+            "preparing to relocate",
+            "planning to relocate",
+            "planning to move",
+            "relocate my career",
+        )
+        if any(phrase in body_folded for phrase in relocation_intent):
+            raise ValueError("ilk temasta tasinma ifadesi kullanilamaz")
+        if "i am writing to apply for a full-time position" not in body_folded:
+            raise ValueError("Ingilizce ilk temasta onayli acilis eksik")
+        # Metin bir is basvurusu olarak okunmali. Onceki surum "no cost
+        # proof of concept" teklif ediyordu ve alicilar bunu otomasyon
+        # satis girisimi sandi; teklif dili bir daha girmesin diye kilit.
+        satis_dili = ("at no cost", "proof of concept", "free of charge",
+                      "i can build", "i will build", "our services")
+        satis = [ifade for ifade in satis_dili if ifade in body_folded]
+        if satis:
+            raise ValueError(f"is basvurusu metninde hizmet teklifi dili var: {satis}")
+        if "clemta" in body_folded or "acun media" in body_folded:
+            raise ValueError("ilk temas metninde onceki isveren adi kullanilamaz")
     return subject, body, country, language
 
 
@@ -303,7 +438,7 @@ def build_msg(row: dict[str, str]) -> tuple[EmailMessage, str, str]:
     message["Message-ID"] = f"<{digest}@job-outreach.local>"
     message.set_content(body)
     message.add_attachment(
-        CV_PATH.read_bytes(), maintype="application", subtype="pdf", filename="Emin-Kilic-CV.pdf"
+        CV_PATH.read_bytes(), maintype="application", subtype="pdf", filename="Emin_Kilic_CV_EN.pdf"
     )
     return message, country, language
 
@@ -438,16 +573,36 @@ class DeliveryState:
 
 
 @contextmanager
-def delivery_lock():
-    handle = LOCK_PATH.open("w")
+def _file_lock(path: Path, message: str):
+    handle = path.open("w")
     try:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise AlreadyRunningError("baska bir gonderim sureci zaten calisiyor") from exc
+            raise AlreadyRunningError(message) from exc
         yield handle
     finally:
         handle.close()
+
+
+@contextmanager
+def delivery_lock():
+    """One sender at a time for the complete SMTP delivery run."""
+    with _file_lock(LOCK_PATH, "baska bir gonderim sureci zaten calisiyor") as handle:
+        yield handle
+
+
+@contextmanager
+def queue_lock():
+    """Protect a short queue snapshot or atomic queue publication.
+
+    It is intentionally distinct from ``delivery_lock``: a sender works from a
+    frozen in-memory batch, so an evidence-verified publisher can append later
+    contacts while that batch is being delivered. New rows are then picked up
+    by the next hourly/worker trigger without touching the sender's snapshot.
+    """
+    with _file_lock(QUEUE_LOCK_PATH, "kuyruk guncellemesi zaten calisiyor") as handle:
+        yield handle
 
 
 def connect_smtp(attempts: int = 3):

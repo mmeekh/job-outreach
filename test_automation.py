@@ -41,6 +41,57 @@ def sample_row(tag: str = "DE-EN", email: str = "candidate@example.test"):
 
 
 class RoutingAndDataTests(unittest.TestCase):
+    def test_scraper_url_fragments_cannot_become_recipients(self):
+        self.assertTrue(send_mails.is_valid_recipient_email("jobs@example.de"))
+        self.assertFalse(send_mails.is_valid_recipient_email("//teams.example/users=jobs@example.de"))
+        self.assertFalse(send_mails.is_valid_recipient_email("/jobs@example.de"))
+        self.assertFalse(send_mails.is_valid_recipient_email("https://example.de/contact"))
+
+    def test_turkish_company_priority_requires_explicit_queue_marker(self):
+        row = sample_row()
+        self.assertFalse(send_mails.has_turkish_company_priority(row))
+        row["dil_notu"] = "personalized-required; turkish-company-priority"
+        self.assertTrue(send_mails.has_turkish_company_priority(row))
+
+    def test_enterprise_brand_blocks_country_domain_variant(self):
+        row = sample_row()
+        row.update(firma="Bain & Company", site="bain.uk")
+        self.assertEqual(
+            send_mails.enterprise_exclusion_reason(row),
+            "global enterprise employer",
+        )
+
+    def test_personalized_snapshot_is_used_for_verified_queue_rows(self):
+        row = sample_row(email="personalized@example.test")
+        body = (
+            "Dear Example Finance team,\n\nI am writing to apply for a full-time position "
+            "in finance or administration at Example Finance.\n\n"
+            "Your reporting platform caught my attention. I work with Power BI daily.\n\n"
+            "Kind regards,\nEmin Kilic\n"
+            f"LinkedIn: {send_mails.LINKEDIN_URL}\nGitHub: {send_mails.GITHUB_URL}\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "personalizations.csv"
+            with path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=[
+                    "email", "firma", "subject", "body", "evidence_hash", "fit_score", "email_source_url"
+                ])
+                writer.writeheader()
+                writer.writerow({
+                    "email": row["email"], "firma": row["firma"],
+                    "subject": send_mails.english_subject_for(row["firma"]),
+                    "body": body, "evidence_hash": "abc", "fit_score": "70",
+                    "email_source_url": "https://example.test/contact",
+                })
+            row["dil_notu"] = "personalized-required"
+            expected_subject = send_mails.english_subject_for(row["firma"])
+            with mock.patch.object(send_mails, "PERSONALIZATIONS_PATH", path):
+                send_mails._PERSONALIZATION_CACHE_KEY = None
+                subject, rendered, _country, language = send_mails.render_for(row)
+        self.assertEqual(subject, expected_subject)
+        self.assertEqual(language, "en")
+        self.assertIn("reporting platform", rendered)
+
     def test_every_active_row_renders_and_has_https_link(self):
         rows = send_mails.load_rows()
         self.assertGreater(len(rows), 0)
@@ -49,6 +100,22 @@ class RoutingAndDataTests(unittest.TestCase):
             self.assertTrue(subject)
             self.assertIn(send_mails.LINKEDIN_URL, body)
             self.assertIn(send_mails.GITHUB_URL, body)
+            if language == "en":
+                self.assertIn("i am writing to apply for a full-time position", body.casefold())
+                # Metin is basvurusu; hizmet teklifi dili girmemeli.
+                for ifade in ("at no cost", "proof of concept", "free of charge"):
+                    self.assertNotIn(ifade, body.casefold())
+                self.assertNotIn("clemta", body.casefold())
+                self.assertNotIn("acun media", body.casefold())
+                self.assertIn("power bi", body.casefold())
+            body_folded = body.casefold()
+            for phrase in (
+                "preparing to relocate",
+                "planning to relocate",
+                "planning to move",
+                "relocate my career",
+            ):
+                self.assertNotIn(phrase, body_folded)
             if country != "NL":
                 self.assertNotEqual(language, "nl")
                 # Hollandaca kontrolu SABLONDA yapilir: alici firmanin adinda
@@ -59,9 +126,9 @@ class RoutingAndDataTests(unittest.TestCase):
                     self.assertNotIn(marker, sablon, row["email"])
 
     def test_every_active_row_is_routed_to_an_allowed_language(self):
-        """Avrupa/Korfez kollari Ingilizce; Turkiye ve kruvaziyer kollari kendi
-        sablonlarini kullanir. Baska hicbir kombinasyona izin verilmez."""
-        allowed = {"TR": "tr-yerel", "CRUISE": "en-cruise"}
+        """Kampanyanin tek sablonu Ingilizce; her rota ona cikmali. TR ve
+        kruvaziyer kollarinin ayri sablonlari kaldirildi."""
+        allowed = {}
         rows = send_mails.load_rows()
         for row in rows:
             country, language = send_mails.route_for(row)
