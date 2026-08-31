@@ -27,12 +27,17 @@ DAILY_LIMIT = 450
 NEW_CONTACT_DAILY_LIMIT = DAILY_LIMIT
 SEND_TIMEZONE = ZoneInfo("Europe/Istanbul")
 SEND_START_HOUR = 9
-SEND_END_HOUR = 18
+SEND_END_HOUR = 20  # 31 Agu 2026: gunluk 400 hedefi 9 saatlik pencereye sigmiyordu
 
 
 def within_send_window(now: datetime | None = None) -> bool:
-    """09:00-18:00 arasi, Turkiye saati. Hafta sonu dahil her gun calisir
-    (8 Agu 2026 kullanici karari: bot durmasin)."""
+    """09:00-20:00 arasi, Turkiye saati. Hafta sonu dahil her gun calisir
+    (8 Agu 2026 kullanici karari: bot durmasin).
+
+    31 Agu 2026'da 18:00'den 20:00'ye uzatildi: olculen gercek hiz mail basina
+    86 sn (uyku ortalamasi 77 + SMTP baglanti yuku ~9) ve 9 saatlik pencereye
+    ancak ~377 mail sigiyordu. 11 saat 460 maillik yer aciyor, gunluk 400 hedefi
+    araligi kisaltmadan tutuyor. 20:00 Istanbul = 19:00 Hollanda."""
     local_now = now or datetime.now(SEND_TIMEZONE)
     return SEND_START_HOUR <= local_now.hour < SEND_END_HOUR
 
@@ -94,7 +99,7 @@ def main() -> None:
             )
             for index, row in enumerate(todo, 1):
                 if not within_send_window():
-                    print("18:00 Europe/Istanbul oldu; kalan mailler sonraki is gunune birakildi", flush=True)
+                    print(f"{SEND_END_HOUR}:00 Europe/Istanbul oldu; kalan mailler yarina birakildi", flush=True)
                     break
                 try:
                     sent = send_row(row, state)
