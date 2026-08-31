@@ -58,7 +58,11 @@ PASSWORD_PATH = Path(os.environ.get(
 LINKEDIN_URL = "https://www.linkedin.com/in/emin-kilic-dd58gr9cd"
 GITHUB_URL = "https://github.com/mmeekh"
 # 450 mail 9 saatlik pencereye sigmali: ortalama gecikme <= 72sn olmali
-MIN_DELAY, MAX_DELAY = 60, 180  # 1-3 dakika (31 Agu 2026 kullanici karari)
+# 09:00-18:00 Europe/Istanbul penceresi 32.400 sn. Gunde 400 mail hedefi
+# mail basina 81 sn birakiyor; SMTP baglanti yuku ~4 sn, kalan ~77 sn uyku.
+# 26-28 Agu 2026'da ayni hesap 35-100 sn ile uc gun ust uste 450 gonderdi ve
+# Gmail kota hatasi alinmadi, bu aralik onun biraz gevsegi.
+MIN_DELAY, MAX_DELAY = 35, 110
 
 NON_NL_FORBIDDEN = (
     "open sollicitatie",
