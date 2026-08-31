@@ -89,9 +89,32 @@ RECIPIENT_EMAIL_RE = re.compile(
 )
 
 
+# Scraper'in birakabildigi artiklar: URL kodlu bosluk/tirnak (%20, %91) ve
+# Excel'in metin hucrelerine ekledigi bastaki kesme isareti. Bunlar RFC'ye gore
+# gecerli yerel ad karakteri oldugu icin regex'ten geciyorlardi; 31 Agu 2026'da
+# kuyrukta 4 gercek firma bu yuzden bounce'a gidecek adresle bekliyordu.
+SCRAPER_ARTIFACT_RE = re.compile(r"^(?:%[0-9A-Fa-f]{2}|['\"`])+")
+SHARED_MAIL_PROVIDERS = {
+    "gmail.com", "googlemail.com", "hotmail.com", "hotmail.nl", "outlook.com",
+    "live.nl", "live.com", "yahoo.com", "icloud.com", "me.com", "gmx.de",
+    "gmx.net", "web.de", "ziggo.nl", "kpnmail.nl", "planet.nl", "home.nl",
+    "xs4all.nl", "casema.nl", "chello.nl", "upcmail.nl", "telfort.nl",
+    "online.nl", "hetnet.nl", "zonnet.nl", "t-online.de", "freenet.de",
+    # Kuyruktan cikanlar: ulke ISP'leri, DATEV'in ortak posta servisi ve
+    # Personio'nun ise alim gelen kutusu. Hepsinde her adres ayri bir firma.
+    "abv.bg", "wp.pl", "sapo.pt", "online.de", "emirates.net.ae",
+    "datevnet.de", "m.personio.de",
+}
+PLACEHOLDER_DOMAINS = {"example.com", "example.org", "example.net", "example.nl",
+                       "test.com", "domain.com", "yourdomain.com"}
+
+
 def is_valid_recipient_email(value: str) -> bool:
     """Reject scraper URL fragments and malformed mailbox values fail-closed."""
     candidate = (value or "").strip()
+    yerel, _, alan = candidate.rpartition("@")
+    if alan.casefold() in PLACEHOLDER_DOMAINS or SCRAPER_ARTIFACT_RE.match(yerel):
+        return False
     return bool(
         candidate
         and len(candidate) <= 254
@@ -655,6 +678,34 @@ def send_row(row: dict[str, str], state: DeliveryState) -> bool:
     return True
 
 
+def assert_unique_organizations(todo: list[dict[str, str]]) -> None:
+    """Ayni sirkete bu turda iki basvuru gitmesin.
+
+    Kurum tekilligi WEB SITESINE bakiyor; ayni sirketin iki markasi ya da iki
+    subesi farkli siteler kullanip ayni posta kutusunu paylasabiliyor ve
+    kontrolden kaciyor. Bu kontrol yalnizca GONDERILECEK kuyruga uygulanir:
+    coktan gonderilmis gecmis kayitlar icin yapilacak bir sey yok, onlari da
+    tarayinca arac hic acilmiyordu. Paylasimli saglayicilardaki her adres ayri
+    bir firmadir, onlar kurala girmez.
+    """
+    kurumsal = Counter(
+        normalize_email(row.get("email", "")).split("@")[-1]
+        for row in todo
+        if normalize_email(row.get("email", "")).split("@")[-1] not in SHARED_MAIL_PROVIDERS
+    )
+    cakisan = sorted(alan for alan, adet in kurumsal.items() if adet > 1)
+    if cakisan:
+        detay = {
+            alan: [f"{row['firma']} <{row['email']}>" for row in todo
+                   if normalize_email(row["email"]).split("@")[-1] == alan]
+            for alan in cakisan
+        }
+        raise ValueError(
+            "ayni kurumsal posta alan adina birden fazla alici var; birini "
+            f"exclusions.csv'ye ekleyin: {detay}"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group(required=True)
@@ -673,6 +724,7 @@ def main() -> None:
     with DeliveryState() as state:
         attempted = state.attempted_emails()
         todo = [row for row in rows if normalize_email(row["email"]) not in attempted]
+        assert_unique_organizations(todo)
         print(f"aktif {len(rows)}, daha once denenmis {len(rows)-len(todo)}, sirada {len(todo)}")
         if args.dry_run:
             for index, row in enumerate(todo, 1):
@@ -691,6 +743,7 @@ def main() -> None:
     try:
         with delivery_lock(), DeliveryState() as state:
             todo = [row for row in rows if normalize_email(row["email"]) not in state.attempted_emails()]
+            assert_unique_organizations(todo)
             for index, row in enumerate(todo, 1):
                 try:
                     sent = send_row(row, state)
