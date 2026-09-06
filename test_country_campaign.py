@@ -201,7 +201,8 @@ class PublisherCampaignTests(unittest.TestCase):
             write(generated, sorted(publisher.PERSONALIZATION_FIELDS), personalized)
             with patch.multiple(publisher, CSV_PATH=queue, EXCLUSIONS_PATH=exclusions,
                                 LOG_PATH=legacy, PERSONALIZATIONS_PATH=personal,
-                                BACKUP_DIR=base / "backups", TARGET_PER_COUNTRY=2), \
+                                BACKUP_DIR=base / "backups"), \
+                 patch.object(publisher, "target_for", lambda country: 2), \
                  patch.object(publisher, "queue_lock", nullcontext), \
                  patch.object(publisher, "load_rows", lambda: publisher.read_csv(queue)), \
                  patch.object(publisher, "enterprise_exclusion_reason", lambda r: None), \

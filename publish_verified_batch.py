@@ -39,7 +39,7 @@ from send_mails import (
 )
 from project_paths import AUDIT_DIR, BACKUP_DIR, dated_dir
 from country_campaign import (COUNTRIES, MARKER, MIN_FIT_SCORE,
-                              TARGET_PER_COUNTRY, accepted_counts)
+                              accepted_counts, target_for)
 
 AUDIT_FIELDS = {
     "oncelik", "firma", "sehir", "email", "site", "fit_score", "email_source_url",
@@ -219,7 +219,7 @@ def main() -> None:
             country = route_for(candidate)[0] if not problem else ""
             if not problem and country not in COUNTRIES:
                 problem = "country outside active campaign"
-            if not problem and cohort_counts[country] >= TARGET_PER_COUNTRY:
+            if not problem and cohort_counts[country] >= target_for(country):
                 problem = "country research target already published"
             if email in duplicate_personalizations:
                 problem = problem or "duplicate personalization"

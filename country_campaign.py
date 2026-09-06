@@ -16,7 +16,17 @@ COUNTRIES = ("IE", "PL", "NL", "GB", "FI", "AT", "BE", "PT", "SE", "NO", "CH",
              "MT", "LU")
 EXHAUSTED = ("MT", "LU")
 RESEARCH_COUNTRIES = tuple(c for c in COUNTRIES if c not in EXHAUSTED)
-TARGET_PER_COUNTRY = 900
+# 6 Eyl 2026: ulke basina 900 tavani kaldirildi. NL tam 900'e dayanmisti ve
+# yayina hazir 429 adayin 410'u "country research target already published"
+# diye eleniyordu. Hedef artik 2 haftalik gonderim hacmi (14 x 450).
+CAMPAIGN_TOTAL_TARGET = 6300
+TARGET_PER_COUNTRY = CAMPAIGN_TOTAL_TARGET
+# Onaylanan ulke dagilimi buraya yazilir; bos birakilan ulke ortak tavani alir.
+TARGET_BY_COUNTRY: dict[str, int] = {}
+
+
+def target_for(country: str) -> int:
+    return TARGET_BY_COUNTRY.get(country, TARGET_PER_COUNTRY)
 DAILY_PER_COUNTRY = 90
 # Yayinci ve arastirmaci ayni uygunluk esigini kullanir; scraper tarafindaki
 # profile_fit.QUALIFY_MIN_SCORE ile ayni degerde tutulmalidir.
