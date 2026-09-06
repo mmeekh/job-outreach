@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from collections import Counter
 import hashlib
 import re
 from pathlib import Path
@@ -172,13 +173,17 @@ I am writing to apply for a full-time position in finance or administration at {
 
 {_observation(row)}
 
-I'm Emin, an economics graduate with around three years of experience in accounting and reporting: accounts payable, reconciliations, month-end closing, and reporting in Excel and Power BI. I am used to working to deadlines on client books and to keeping the documentation in order.
+I'm Emin, an economics graduate with around three years of experience in accounting and reporting: accounts payable, reconciliations, month-end closing, and Excel-based reporting. I am used to working to deadlines on client books and to keeping the documentation in order.
 
 I also automate the repetitive parts of that work with Excel/VBA and Python. That is part of how I do the job rather than something separate: less time on manual data entry, more time on the work that needs judgement.
 
 What I am looking for is one long-term, full-time role where I can take on day-to-day financial administration and grow with the team.
 
+I would be happy to have a short introductory call if my profile could be relevant to your team.
+
 I've also attached my CV for context.
+
+I consent to you keeping my CV on file for future suitable opportunities.
 
 Kind regards,
 Emin Kilic
@@ -213,6 +218,8 @@ def validate(row: dict[str, str], subject: str, body: str) -> None:
         raise ValueError(f"basvuru metninde hizmet teklifi dili var: {satis}")
     if body.count("I've also attached my CV for context.") != 1:
         raise ValueError("CV eki ifadesi tam bir kez bulunmali")
+    if body.count("I consent to you keeping my CV on file for future suitable opportunities.") != 1:
+        raise ValueError("CV saklama izni tam bir kez bulunmali")
     if LINKEDIN not in body or GITHUB not in body:
         raise ValueError("HTTPS profil linkleri eksik")
     if not (row.get("email_source_url") or "").startswith("https://"):
@@ -220,7 +227,11 @@ def validate(row: dict[str, str], subject: str, body: str) -> None:
     if re.search(r"\{[a-z_]+\}", body):
         raise ValueError("doldurulmamis alan var")
     forbidden = ("i hope this email finds you well", "synergy", "leverage", "best-in-class")
-    if any(term in body.casefold() for term in forbidden):
+    # A legitimate company name such as "sc synergy GmbH" must not be treated
+    # as templated marketing language.  This check applies to our copy, not
+    # the recipient's name inserted into it.
+    style_body = body.casefold().replace(row["firma"].casefold(), "")
+    if any(term in style_body for term in forbidden):
         raise ValueError("yasakli cold-email kalibi bulundu")
     body_folded = body.casefold()
     relocation_intent = (
@@ -248,9 +259,19 @@ def main() -> None:
     args = parser.parse_args()
     rows = list(csv.DictReader(Path(args.input).open(encoding="utf-8")))
     generated: list[dict[str, str]] = []
+    # 6 Eyl 2026: tek bir uygunsuz satir (ornegin HTTPS olmayan kanit adresi)
+    # butun partiyi cokertiyordu; 1.842 adayin tamami tek bir http:// yuzunden
+    # yayinlanamadi. Dogrulama kurallari aynen duruyor, sadece basarisiz satir
+    # atlaniyor: kisisellestirmesi olmayan satiri yayinci zaten "missing
+    # personalization" diyerek eliyor.
+    skipped: Counter[str] = Counter()
     for row in rows:
-        subject, body = generate(row)
-        validate(row, subject, body)
+        try:
+            subject, body = generate(row)
+            validate(row, subject, body)
+        except ValueError as exc:
+            skipped[str(exc)[:80]] += 1
+            continue
         generated.append({
             "email": row["email"].strip().casefold(),
             "firma": row["firma"].strip(),
@@ -273,6 +294,14 @@ def main() -> None:
             )
         Path(args.preview).write_text("\n\n---\n\n".join(sections) + "\n", encoding="utf-8")
     print(f"{len(generated)} kanitli cover email -> {args.output}")
+    if skipped:
+        print(f"  atlanan: {sum(skipped.values())}")
+        for reason, count in skipped.most_common(8):
+            print(f"    {count:>5}  {reason}")
+    # Hicbir satir gecmiyorsa sorun veride degil sablondadir; sessizce bos
+    # CSV uretip yayin turunu basarili saymayalim.
+    if rows and not generated:
+        raise SystemExit("hicbir satir dogrulamayi gecemedi; sablonu kontrol edin")
 
 
 if __name__ == "__main__":
