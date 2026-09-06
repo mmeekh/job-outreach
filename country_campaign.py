@@ -1,32 +1,57 @@
 """Shared personal campaign targets and restart-safe, balanced batch selection."""
+import math
 from collections import Counter, deque
 
 from send_mails import normalize_email, route_for
 
-CAMPAIGN = "five-countries-20260905"
-# 6 Eyl 2026: Almanya kapatildi (3.053 alici tamamlandi, kuyrukta DE kalmadi).
-# Yerine, veritabaninda halihazirda derinligi olan Avrupa ulkeleri alindi.
-# Kampanya etiketi bilerek degismedi: yayinlanmis 588 aliciyi kohorttan
-# dusurup yeniden siraya sokmanin faydasi yok.
-#
-# MT ve LU kaynak olarak tukendi (sirasiyla 278 ve 1.053 lead). Yeni ARASTIRMA
-# almazlar, ama COUNTRIES'te kalirlar: kuyrukta zaten dogrulanip yayinlanmis
-# 51 Malta/Luksemburg alicisi var, onlari ulasilamaz hale getirmeyiz.
-COUNTRIES = ("IE", "PL", "NL", "GB", "FI", "AT", "BE", "PT", "SE", "NO", "CH",
-             "MT", "LU")
-EXHAUSTED = ("MT", "LU")
-RESEARCH_COUNTRIES = tuple(c for c in COUNTRIES if c not in EXHAUSTED)
-# 6 Eyl 2026: ulke basina 900 tavani kaldirildi. NL tam 900'e dayanmisti ve
-# yayina hazir 429 adayin 410'u "country research target already published"
-# diye eleniyordu. Hedef artik 2 haftalik gonderim hacmi (14 x 450).
+# 6 Eyl 2026: yeni etiket bilerek verildi. Kuyrukta duran 2.785 alici eski
+# etiketi tasidigi icin `in_cohort` onlara False doner; `old_first_batch`
+# once onlari bosaltir (gunde 450, CSV sirasinda) ve ancak kuyruk bittiginde
+# asagidaki yuzdeli dagitim devreye girer. Kullanici karari: "once siradaki
+# ilanlar bitsin, sonra bu yuzdelerle gonderelim".
+CAMPAIGN = "europe-english-20260906"
+# Almanya 6 Eyl 2026'da kapatildi: 3.053 alici tamamlandi, kuyrukta DE kalmadi.
+# Hedef, 2 haftalik gonderim hacmi (14 gun x 450).
 CAMPAIGN_TOTAL_TARGET = 6300
+COUNTRIES = ("GB", "IE", "PL", "NL", "PT", "MT", "FI", "SE", "NO",
+             "LU", "CH", "AT", "BE")
+# Yeni arastirma yalnizca agirligi olan ulkelere gider. LU/CH/AT/BE
+# COUNTRIES'te kalir cunku kuyrukta yayinlanmis alicilari var; yenisi aranmaz.
+# CH: AB disi vatandaslar icin kota cok sikci. AT/BE: yerel firmalarda
+# Almanca/Fransizca sart, havuz da 71 ve 61 lead. MT/LU OSM'de tukendi ama
+# MT'nin kalitesi yuksek (Ingilizce resmi dil), Wikidata'dan beslenebilir.
+#
+# Agirliklar 6 Eyl 2026 kullanici onayi. Olcut "Ingilizce konusan firma"
+# degil, "beni ise alabilecek firma": Turk vatandasi olarak her AB ulkesinde
+# calisma izni gerekiyor, bu Ingilizceden daha sert bir filtre.
+#   GB 35 - ana dil + 12.696 sektore uygun lisansli sponsorun 11.100'u hic
+#           kullanilmamis; sponsor lisansi zaten "AB disindan alabilirim" demek
+#   IE 20 - ana dil, AB ici, 1.338 uygun leade karsilik sadece 323 mail gitmis
+#   PL 15 - Krakow/Varsova servis merkezlerinde calisma dili Ingilizce,
+#           izin esigi dusuk, 6.722 leade karsilik 151 mail
+#   NL 15 - en yuksek Ingilizce yeterliligi ama 1.711 mail ile en doygun
+#           ikinci ulke; bilerek sinirlandi, yalnizca taninmis sponsorlar
+#   PT  6 - Lizbon/Porto servis merkezi buyumesi, calisma dili Ingilizce
+#   MT  4 - Ingilizce resmi dil, finans/denetim agirlikli
+#   FI/SE/NO 5 - cok yuksek Ingilizce, temiz havuzlar; derinlige gore bolundu
+WEIGHTS = {"GB": 35, "IE": 20, "PL": 15, "NL": 15, "PT": 6, "MT": 4,
+           "FI": 3, "SE": 1, "NO": 1}
+RESEARCH_COUNTRIES = tuple(WEIGHTS)
 TARGET_PER_COUNTRY = CAMPAIGN_TOTAL_TARGET
-# Onaylanan ulke dagilimi buraya yazilir; bos birakilan ulke ortak tavani alir.
-TARGET_BY_COUNTRY: dict[str, int] = {}
+TOTAL_WEIGHT = sum(WEIGHTS.values())
+# 2 haftalik arastirma hedefi ayni yuzdelerden turer; agirligi olmayan ulke
+# yeni aday almaz (kuyruktaki eski alicilari etkilenmez).
+TARGET_BY_COUNTRY = {country: round(CAMPAIGN_TOTAL_TARGET * weight / TOTAL_WEIGHT)
+                     for country, weight in WEIGHTS.items()}
 
 
 def target_for(country: str) -> int:
-    return TARGET_BY_COUNTRY.get(country, TARGET_PER_COUNTRY)
+    return TARGET_BY_COUNTRY.get(country, 0)
+
+
+def daily_share(country: str, limit: int) -> int:
+    """Bir gunluk partide bu ulkeye dusen ust sinir."""
+    return math.ceil(limit * WEIGHTS.get(country, 0) / TOTAL_WEIGHT)
 DAILY_PER_COUNTRY = 90
 # Yayinci ve arastirmaci ayni uygunluk esigini kullanir; scraper tarafindaki
 # profile_fit.QUALIFY_MIN_SCORE ile ayni degerde tutulmalidir.
@@ -71,7 +96,7 @@ def claimed_counts(state, day, rows, *, cohort_only=False):
 
 
 def balanced_batch(rows, claimed, limit):
-    """Interleave countries least-served-first, in two passes.
+    """Ulkeleri onaylanan yuzdelere gore, iki turda dagit.
 
     Claims (including uncertain SMTP results) consume quota permanently. A
     partial run catches the other countries up on restart before progressing.
@@ -80,10 +105,14 @@ def balanced_batch(rows, claimed, limit):
     6 Eyl 2026 duzeltmesi: tavan `min(counts[c] + len(buckets[c]) for c in
     COUNTRIES)` ile hesaplaniyordu, yani en fakir ulke butun kampanyayi
     kilitliyordu. Malta'da 22 aday kalinca gunluk tavan 5x22=110'a dustu ve
-    IE/PL/NL'deki yuzlerce hazir alici beklemede kaldi. Artik esitlik ilk
-    turda korunur (ulke basina DAILY_PER_COUNTRY'ye kadar), tukenen ulkeler
-    sadece kendi siralarini kaybeder; limit hala dolmadiysa ikinci tur
-    kalan kotayi yine en az hizmet almis ulkeden baslayarak dagitir.
+    IE/PL/NL'deki yuzlerce hazir alici beklemede kaldi.
+
+    Ayni tarihte esit dagitim yerine WEIGHTS yuzdeleri geldi. Ilk turda her
+    ulke gunluk payina kadar alir ve sira, payina gore en geride kalan ulkeye
+    gider (counts/weight en kucuk). Adayi biten ulke yalnizca kendi sirasini
+    kaybeder. Limit hala dolmadiysa ikinci tur pay tavanini kaldirir ve
+    agirligi olmayan ulkeleri de dahil eder; boylece kuyrukta kalmis bir alici
+    (ornegin kapatilan LU/CH/AT/BE) mahsur kalmaz.
     """
     buckets = {country: deque() for country in COUNTRIES}
     seen = set()
@@ -95,14 +124,20 @@ def balanced_batch(rows, claimed, limit):
             seen.add(email)
     counts = Counter(claimed)
     selected = []
-    for ceiling in (DAILY_PER_COUNTRY, None):
+    for weighted in (True, False):
         while len(selected) < max(0, limit):
             available = [country for country in COUNTRIES
                          if buckets[country]
-                         and (ceiling is None or counts[country] < ceiling)]
+                         and (not weighted
+                              or (WEIGHTS.get(country, 0)
+                                  and counts[country] < daily_share(country, limit)))]
             if not available:
                 break
-            country = min(available, key=lambda c: counts[c])
+            if weighted:
+                country = min(available,
+                              key=lambda c: (counts[c] / WEIGHTS[c], COUNTRIES.index(c)))
+            else:
+                country = min(available, key=lambda c: (counts[c], COUNTRIES.index(c)))
             selected.append(buckets[country].popleft())
             counts[country] += 1
     return selected

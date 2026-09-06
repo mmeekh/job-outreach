@@ -7,9 +7,9 @@ from contextlib import nullcontext, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from country_campaign import (COUNTRIES, DAILY_PER_COUNTRY, MARKER, accepted_counts,
-                              balanced_batch, claimed_counts, old_first_batch,
-                              in_cohort)
+from country_campaign import (COUNTRIES, DAILY_PER_COUNTRY, MARKER, WEIGHTS,
+                              accepted_counts, balanced_batch, claimed_counts,
+                              daily_share, old_first_batch, in_cohort)
 from send_mails import DeliveryState, route_for
 
 
@@ -91,13 +91,13 @@ class CountryCampaignTests(unittest.TestCase):
                 self.assertEqual(state.claimed_on("2026-09-07"), 2)
                 self.assertEqual(claimed_counts(state, "2026-09-07", [old, new], cohort_only=True), {"PL": 1})
 
-    def test_full_day_fills_the_limit_and_stays_balanced(self):
-        batch = balanced_batch(rows(dict.fromkeys(COUNTRIES, 150)), {}, 450)
+    def test_full_day_follows_the_approved_weights(self):
+        batch = balanced_batch(rows(dict.fromkeys(COUNTRIES, 500)), {}, 450)
         self.assertEqual(len(batch), 450)
         share = distribution(batch)
-        self.assertLessEqual(max(share.values()) - min(share.values()), 1)
-        self.assertLessEqual(max(share.values()), DAILY_PER_COUNTRY)
-        self.assertEqual([route_for(r)[0] for r in batch[:len(COUNTRIES)]], list(COUNTRIES))
+        for country, weight in WEIGHTS.items():
+            self.assertAlmostEqual(share[country] / 450, weight / sum(WEIGHTS.values()),
+                                   delta=0.005, msg=country)
 
     def test_empty_country_does_not_block_the_rest(self):
         # 6 Eyl 2026 regresyon testi: tavan `min(... for c in COUNTRIES)` ile
@@ -110,16 +110,14 @@ class CountryCampaignTests(unittest.TestCase):
         self.assertNotIn("MT", distribution(batch))
 
     def test_short_country_gives_up_its_turn_only(self):
-        available = dict.fromkeys(COUNTRIES, 200)
-        available["LU"] = 7
+        available = dict.fromkeys(COUNTRIES, 500)
+        available["PT"] = 3
         batch = balanced_batch(rows(available), {}, 450)
         self.assertEqual(len(batch), 450)
         share = distribution(batch)
-        self.assertEqual(share["LU"], 7)
-        # Kalan kota tukenmeyen ulkelere esit dagilir, LU'nun hizina inmez.
-        rest = [v for country, v in share.items() if country != "LU"]
-        self.assertLessEqual(max(rest) - min(rest), 1)
-        self.assertGreater(min(rest), 7)
+        self.assertEqual(share["PT"], 3)
+        # Agirligi buyuk ulkeler PT'nin hizina inmez, kendi paylarini alir.
+        self.assertGreaterEqual(share["GB"], daily_share("GB", 450))
 
     def test_restart_catches_up_from_the_least_served_country(self):
         previous = {"IE": 42, "PL": 41, "NL": 41}
@@ -128,10 +126,11 @@ class CountryCampaignTests(unittest.TestCase):
         self.assertEqual(len(batch), 30)
         self.assertNotIn("IE", distribution(batch))
 
-    def test_daily_cap_holds_while_stock_lasts(self):
-        available = dict.fromkeys(COUNTRIES, 200)
-        batch = balanced_batch(rows(available), {}, DAILY_PER_COUNTRY * len(COUNTRIES))
-        self.assertEqual(distribution(batch), dict.fromkeys(COUNTRIES, DAILY_PER_COUNTRY))
+    def test_weightless_country_is_not_stranded(self):
+        # LU/CH/AT/BE kapatildi ama kuyrukta yayinlanmis alicilari kalabilir;
+        # ikinci tur onlari da almali, yoksa sonsuza kadar mahsur kalirlar.
+        batch = balanced_batch(rows({"LU": 40, "GB": 10, "IE": 10}), {}, 450)
+        self.assertEqual(distribution(batch)["LU"], 40)
 
     def test_other_countries_remain_queued_but_are_not_selected(self):
         batch = balanced_batch(rows({**dict.fromkeys(COUNTRIES, 2), "CA": 10}), {}, 450)
@@ -143,7 +142,8 @@ class CountryCampaignTests(unittest.TestCase):
         batch = balanced_batch(candidates + candidates, {}, 17)
         self.assertEqual(len(batch), 17)
         self.assertEqual(len({r["email"] for r in batch}), 17)
-        self.assertLessEqual(max(distribution(batch).values()) - min(distribution(batch).values()), 1)
+        # Kucuk partide de en agir ulke en cok payi alir.
+        self.assertEqual(max(distribution(batch), key=distribution(batch).get), "GB")
 
     def test_cohort_excludes_old_queue_and_duplicate_rows(self):
         candidates = rows({"IE": 3})
