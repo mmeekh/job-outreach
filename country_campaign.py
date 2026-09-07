@@ -36,7 +36,11 @@ COUNTRIES = ("GB", "IE", "PL", "NL", "PT", "MT", "FI", "SE", "NO",
 #   FI/SE/NO 5 - cok yuksek Ingilizce, temiz havuzlar; derinlige gore bolundu
 WEIGHTS = {"GB": 35, "IE": 20, "PL": 15, "NL": 15, "PT": 6, "MT": 4,
            "FI": 3, "SE": 1, "NO": 1}
-RESEARCH_COUNTRIES = tuple(WEIGHTS)
+# Agirligi buyuk olan once arastirilir. Ayri bir sira listesi TUTULMAZ:
+# 6-7 Eyl gecesi orkestratordeki RESEARCH_ORDER bu kumeyle uyusmuyordu
+# (MT yoktu, kapatilan CH/AT/BE vardi) ve `.index()` ValueError firlatip
+# servisi 398 kez cokerterek butun geceyi bosa harcadi.
+RESEARCH_COUNTRIES = tuple(sorted(WEIGHTS, key=lambda c: (-WEIGHTS[c], c)))
 TARGET_PER_COUNTRY = CAMPAIGN_TOTAL_TARGET
 TOTAL_WEIGHT = sum(WEIGHTS.values())
 # 2 haftalik arastirma hedefi ayni yuzdelerden turer; agirligi olmayan ulke
