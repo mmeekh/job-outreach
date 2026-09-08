@@ -60,6 +60,12 @@ DAILY_PER_COUNTRY = 90
 # Yayinci ve arastirmaci ayni uygunluk esigini kullanir; scraper tarafindaki
 # profile_fit.QUALIFY_MIN_SCORE ile ayni degerde tutulmalidir.
 MIN_FIT_SCORE = 25
+# 8 Eyl 2026 kullanici karari: "ready to send" QUEUE_LOW'a dusunce tarama
+# kendiliginden baslar ve kuyruk QUEUE_HIGH'a ulasinca durur. Gece penceresi
+# QUEUE_HIGH'in altindaysa zaten calisir; gunduz yalnizca QUEUE_LOW'a inince
+# devreye girer (VPS'i gereksiz yormamak icin).
+QUEUE_LOW = 450
+QUEUE_HIGH = 900
 DAILY_TOTAL = DAILY_PER_COUNTRY * len(COUNTRIES)
 MARKER = f"campaign={CAMPAIGN}"
 

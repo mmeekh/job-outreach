@@ -27,7 +27,7 @@ from pathlib import Path
 import json
 
 from send_mails import EMAIL, DeliveryState, connect_smtp, load_rows, normalize_email
-from country_campaign import CAMPAIGN, RESEARCH_COUNTRIES, WEIGHTS
+from country_campaign import CAMPAIGN, QUEUE_HIGH, QUEUE_LOW, RESEARCH_COUNTRIES, WEIGHTS
 
 BASE = Path(__file__).resolve().parent
 SCRAPER = BASE.parent / "lead-scraper"
@@ -40,7 +40,7 @@ STATE_PATH = BASE / "runtime" / "research-report-state.json"
 SERVICE = "personal-job-qualified-contact-targets.service"
 DAILY_SEND = 450
 NIGHT_HOURS = 10          # 20:00-05:00 UTC penceresi + pay
-MIN_RUNWAY_DAYS = 2.0     # kuyruk bunun altina dusunce alarm
+MIN_RUNWAY_DAYS = QUEUE_LOW / DAILY_SEND   # kuyruk QUEUE_LOW'un altina dusunce alarm
 
 
 def systemctl_show(*props: str) -> dict[str, str]:
@@ -171,7 +171,8 @@ def build_report(now: datetime) -> tuple[bool, str, str]:
         f"Selfcheck: {'OK' if not problems else 'SORUN'}",
         *(f"  - {p}" for p in problems),
         "",
-        f"Kuyruk: {unsent} denenmemis alici = {runway:.1f} gun ({DAILY_SEND}/gun)",
+        f"Kuyruk: {unsent} denenmemis alici = {runway:.1f} gun ({DAILY_SEND}/gun; "
+        f"tarama {QUEUE_LOW}'e inince baslar, {QUEUE_HIGH}'e cikinca durur)",
         f"Bugun gonderilen: {sent_today}",
     ]
     if alarms:
