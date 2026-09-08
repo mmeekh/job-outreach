@@ -127,7 +127,9 @@ def build_report(now: datetime) -> tuple[bool, str, str]:
     per_country, new_leads = night_output(since)
     processed = sum(p for p, _ in per_country.values())
     qualified = sum(q for _, q in per_country.values())
-    if processed == 0:
+    unsent, runway, sent_today = queue_runway()
+    skipped_by_design = processed == 0 and unsent >= QUEUE_HIGH
+    if processed == 0 and not skipped_by_design:
         alarms.append("gece boyunca HIC firma islenmedi")
 
     svc = systemctl_show("NRestarts", "ActiveState", "Result", "ExecMainStartTimestamp")
@@ -144,12 +146,12 @@ def build_report(now: datetime) -> tuple[bool, str, str]:
     if problems:
         alarms.append("selfcheck basarisiz: " + "; ".join(problems[:3]))
 
-    unsent, runway, sent_today = queue_runway()
     if runway < MIN_RUNWAY_DAYS:
         alarms.append(f"kuyruk {runway:.1f} gunluk kaldi (esik {MIN_RUNWAY_DAYS:g})")
 
     lines = [
         f"Gece penceresi: {since:%d %b %H:%M} - {now:%d %b %H:%M} UTC",
+        *(["Tarama bu gece bilerek atlandi: kuyruk zaten QUEUE_HIGH'in ustunde."] if skipped_by_design else []),
         "",
         f"Islenen firma : {processed}",
         f"Uygun (qualified): {qualified}"
@@ -177,7 +179,7 @@ def build_report(now: datetime) -> tuple[bool, str, str]:
     ]
     if alarms:
         lines = ["ALARM:", *(f"  ! {a}" for a in alarms), ""] + lines
-    tag = "[ALARM]" if alarms else "[arastirma]"
+    tag = "[ALARM]" if alarms else ("[arastirma-atlandi]" if skipped_by_design else "[arastirma]")
     subject = (f"{tag} gece taramasi: {qualified} uygun / {processed} islenen, "
                f"kuyruk {runway:.1f} gun")
     return bool(alarms), subject, "\n".join(lines)
