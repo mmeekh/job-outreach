@@ -24,6 +24,8 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 
+import json
+
 from send_mails import EMAIL, DeliveryState, connect_smtp, load_rows, normalize_email
 from country_campaign import CAMPAIGN, RESEARCH_COUNTRIES, WEIGHTS
 
@@ -31,6 +33,10 @@ BASE = Path(__file__).resolve().parent
 SCRAPER = BASE.parent / "lead-scraper"
 LEADS_DB = SCRAPER / "leads.sqlite3"
 ORCHESTRATOR = SCRAPER / "run-qualified-contact-targets.py"
+# "Yeni lead" sayimi icin son raporda gorulen en buyuk rowid. 8 Eyl 2026: eski
+# olcum checked_at'e bakiyordu; kesif kaynaklari o alani doldurmadigi icin
+# gece 3.000+ firma eklenmisken rapor "2 yeni lead" yazdi.
+STATE_PATH = BASE / "runtime" / "research-report-state.json"
 SERVICE = "personal-job-qualified-contact-targets.service"
 DAILY_SEND = 450
 NIGHT_HOURS = 10          # 20:00-05:00 UTC penceresi + pay
@@ -58,8 +64,20 @@ def journal_tracebacks(since: datetime) -> int:
     return sum(1 for line in result.stdout.splitlines() if line.startswith("Traceback"))
 
 
+def _last_rowid() -> int:
+    try:
+        return int(json.loads(STATE_PATH.read_text()).get("max_rowid", 0))
+    except (OSError, ValueError):
+        return 0
+
+
+def _remember_rowid(value: int) -> None:
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps({"max_rowid": value, "written_at": datetime.now(timezone.utc).isoformat()}))
+
+
 def night_output(since: datetime) -> tuple[dict[str, tuple[int, int]], int]:
-    """Ulke -> (islenen, qualified) ve kampanya kaynakli yeni lead sayisi."""
+    """Ulke -> (islenen, qualified) ve son rapordan beri eklenen yeni lead sayisi."""
     conn = sqlite3.connect(f"file:{LEADS_DB}?mode=ro", uri=True, timeout=30)
     try:
         stamp = since.strftime("%Y-%m-%d %H:%M:%S")
@@ -71,10 +89,11 @@ def night_output(since: datetime) -> tuple[dict[str, tuple[int, int]], int]:
             (stamp,),
         ):
             per_country[country or "?"] = (processed, qualified or 0)
-        new_leads = conn.execute(
-            "SELECT COUNT(*) FROM leads WHERE source LIKE ? AND checked_at >= ?",
-            (f"{CAMPAIGN}%", stamp),
-        ).fetchone()[0]
+        last = _last_rowid()
+        new_leads, max_rowid = conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(rowid), ?) FROM leads WHERE rowid > ?", (last, last),
+        ).fetchone()
+        night_output.max_rowid = int(max_rowid or 0)  # type: ignore[attr-defined]
         return per_country, new_leads
     finally:
         conn.close()
@@ -135,7 +154,7 @@ def build_report(now: datetime) -> tuple[bool, str, str]:
         f"Islenen firma : {processed}",
         f"Uygun (qualified): {qualified}"
         + (f"  (%{100 * qualified / processed:.0f})" if processed else ""),
-        f"Kampanya kaynakli yeni lead: {new_leads}",
+        f"Yeni lead (son rapordan beri, tum kaynaklar): {new_leads}",
         "",
         "Ulke bazinda (islenen / uygun / agirlik):",
     ]
@@ -204,6 +223,9 @@ def main() -> None:
     print(body, flush=True)
     if not args.dry_run:
         send(subject, body)
+        # Deneme calismasi sayaci ilerletmez; gercek rapor bir sonraki gece
+        # icin baslangic noktasini kaydeder.
+        _remember_rowid(getattr(night_output, "max_rowid", 0))
     raise SystemExit(1 if alarm else 0)
 
 
