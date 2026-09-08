@@ -73,6 +73,16 @@ class PersonalizationTests(unittest.TestCase):
         self.assertNotIn("I noticed", body)
         self.assertIn("caught my attention", body)
 
+    def test_product_page_blurbs_are_not_mistaken_for_openings(self):
+        # Descartes, 8 Eyl 2026: "compliance" gecen bir urun sayfasi basligi
+        # anildi ve icindeki "leverage" dogrulayiciya takildi.
+        row = sample_audit()
+        row["job_titles"] = ("Trade Compliance Content for Business Systems Leverage industry-leading "
+                             "content for SAP | Product Classification Integrate classification with your business")
+        _subject, body = p.generate(row)
+        self.assertNotIn("I noticed", body)
+        p.validate(row, _subject, body)
+
     def test_relevant_opening_is_still_cited(self):
         row = sample_audit()
         row["job_titles"] = "Backend Engineer | Junior Accountant | Accounts Payable Specialist"

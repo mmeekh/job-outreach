@@ -84,8 +84,15 @@ def main() -> None:
     finally:
         conn.close()
 
+    # Tek tuk satirin dogrulamayi gecememesi (firma kaynakli metin) yenilemeyi
+    # durdurmamali: o satirlarin eski metni kalir. Cok sayida satir dusuyorsa
+    # sablonun kendisi bozulmus demektir, o zaman hicbir sey yazilmaz.
     if skipped:
-        raise ValueError("cannot safely refresh: " + " | ".join(skipped[:8]))
+        print(f"skipped={len(skipped)}")
+        for line in skipped[:12]:
+            print("  -", line)
+    if skipped and len(skipped) > max(25, len(queue) // 50):
+        raise ValueError("cannot safely refresh: too many rows fail validation")
 
     refreshed = [
         {field: replacements.get(normalize_email(row.get("email", "")), row).get(field, "") for field in fields}

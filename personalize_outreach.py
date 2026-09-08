@@ -83,9 +83,24 @@ RELEVANT_ROLE_TERMS = (
 )
 
 
+MARKETING_TERMS = ("leverage", "synergy", "best-in-class", "industry-leading", "seamless",
+                   "integrate", "your business", "solutions for", "learn more")
+
+
 def relevant_role(title: str) -> bool:
-    """Only openings a finance/administration candidate can plausibly apply to."""
-    low = title.casefold()
+    """Only openings a finance/administration candidate can plausibly apply to.
+
+    A real job title is short. The scraper sometimes captures a product page
+    heading instead ("Trade Compliance Content for Business Systems Leverage
+    industry-leading content..."); those are rejected by length and by
+    marketing vocabulary before the relevance check, so a stray "compliance"
+    cannot smuggle a sales blurb into the opening line.
+    """
+    low = title.casefold().strip()
+    if len(low) > 60 or len(low.split()) > 7:
+        return False
+    if any(term in low for term in MARKETING_TERMS):
+        return False
     return any(term in low for term in RELEVANT_ROLE_TERMS)
 
 
