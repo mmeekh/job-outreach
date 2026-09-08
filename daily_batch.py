@@ -22,12 +22,46 @@ from send_mails import (
     queue_lock,
     send_row,
 )
-from send_mails import assert_unique_organizations
+from send_mails import SHARED_MAIL_PROVIDERS, assert_unique_organizations
+from campaign_pause import pause_status
+from country_campaign import DAILY_TOTAL, old_first_batch, claimed_counts, in_cohort
 DAILY_LIMIT = 450
 NEW_CONTACT_DAILY_LIMIT = DAILY_LIMIT
 SEND_TIMEZONE = ZoneInfo("Europe/Istanbul")
 SEND_START_HOUR = 9
 SEND_END_HOUR = 20  # 31 Agu 2026: gunluk 400 hedefi 9 saatlik pencereye sigmiyordu
+
+
+def corporate_domain(email: str) -> str:
+    """Posta alan adi; paylasimli saglayicilar (gmail vb.) kurum sayilmaz."""
+    domain = normalize_email(email).split("@")[-1]
+    return "" if not domain or domain in SHARED_MAIL_PROVIDERS else domain
+
+
+def dedupe_organizations(rows: list[dict], sent_emails: set[str]) -> tuple[list[dict], list[tuple[str, dict]]]:
+    """Ayni kuruma ikinci basvuruyu, gunu iptal etmeden ayikla.
+
+    8 Eyl 2026: partide iki HSBC adresi cikinca assert_unique_organizations
+    butun turu cokertti ve cron her saat ayni yerde patladi; gun boyunca sifir
+    mail gitti. Kural degismedi (ayni kurumsal alan adina tek basvuru), ama
+    artik iki sekilde uygulanir: daha once mail gitmis bir alan adi atlanir
+    (koruma gecmise bakmiyordu, HSBC'ye 5 Eyl'de zaten yazilmisti) ve ayni
+    listede tekrar eden alan adinin yalnizca ilki kalir. Atlananlar loglanir.
+    """
+    seen = {corporate_domain(email) for email in sent_emails}
+    seen.discard("")
+    kept: list[dict] = []
+    skipped: list[tuple[str, dict]] = []
+    for row in rows:
+        domain = corporate_domain(row.get("email", ""))
+        if domain and domain in seen:
+            skipped.append(("daha once bu kuruma gonderildi" if domain not in
+                            {corporate_domain(r["email"]) for r in kept} else "ayni kurum bu listede", row))
+            continue
+        if domain:
+            seen.add(domain)
+        kept.append(row)
+    return kept, skipped
 
 
 def within_send_window(now: datetime | None = None) -> bool:
@@ -43,11 +77,15 @@ def within_send_window(now: datetime | None = None) -> bool:
 
 
 def main() -> None:
-    requested_limit = int(sys.argv[1]) if len(sys.argv) > 1 else DAILY_LIMIT
+    requested_limit = min(int(sys.argv[1]) if len(sys.argv) > 1 else DAILY_LIMIT, DAILY_TOTAL)
     if requested_limit < 1:
         raise ValueError("gunluk limit pozitif olmali")
+    paused, reason = pause_status()
+    if paused:
+        print(reason)
+        return
     if not within_send_window():
-        print("gonderim penceresi disinda (09:00-18:00 Europe/Istanbul); sonraki calismayi bekliyorum")
+        print("gonderim penceresi disinda (09:00-20:00 Europe/Istanbul); sonraki calismayi bekliyorum")
         return
     try:
         with delivery_lock(), DeliveryState() as state:
@@ -80,14 +118,19 @@ def main() -> None:
                         print(f"ATLANDI-GECERSIZ-SABLON: {row['firma']} ({type(exc).__name__})")
                         continue
                     renderable.append(row)
-                todo = renderable[:remaining_new]
-                # Ayni sirkete bu partide iki basvuru gitmesin.
+                renderable, skipped = dedupe_organizations(renderable, attempted)
+                for reason, row in skipped:
+                    print(f"ATLANDI-AYNI-KURUM: {row['firma']} <{row['email']}> ({reason})")
+                country_claims = claimed_counts(state, today, rows, cohort_only=True)
+                todo = old_first_batch(renderable, country_claims, remaining_new)
+                old_pending = {normalize_email(row["email"]) for row in renderable if not in_cohort(row)}
+                # Ayikladiktan sonra bu bir degismez: hala cakisma varsa gercek bir hata.
                 assert_unique_organizations(todo)
 
             if not todo:
                 pending = [row for row in rows if normalize_email(row["email"]) not in attempted]
                 if pending:
-                    print(f"bugunku {requested_limit} mail tavani doldu, yarin devam")
+                    print(f"gonderim yok: gunluk/ulke kotasi veya esit ulke dagilimi icin aday bekleniyor; tavan={requested_limit}")
                 else:
                     print("gonderilecek yeni firma kalmadi; kampanya tamamlandi")
                 return
@@ -98,6 +141,16 @@ def main() -> None:
                 flush=True,
             )
             for index, row in enumerate(todo, 1):
+                # A connection failure before a durable claim leaves the old
+                # recipient pending. Do not jump into the experiment until a
+                # later automatic run has handled that historical backlog.
+                if in_cohort(row) and old_pending - state.attempted_emails():
+                    print("eski kuyrukta denenmemis alici kaldi; yeni test sonraki otomatik turu bekliyor", flush=True)
+                    break
+                paused, reason = pause_status()
+                if paused:
+                    print(reason, flush=True)
+                    break
                 if not within_send_window():
                     print(f"{SEND_END_HOUR}:00 Europe/Istanbul oldu; kalan mailler yarina birakildi", flush=True)
                     break

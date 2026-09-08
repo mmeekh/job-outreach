@@ -23,6 +23,37 @@ def distribution(batch):
     return Counter(route_for(row)[0] for row in batch)
 
 
+class OrganisationDedupeTests(unittest.TestCase):
+    def test_second_application_to_a_sent_organisation_is_skipped(self):
+        import daily_batch
+        queue = rows({"PL": 1, "MT": 1, "IE": 1})
+        queue[0]["email"] = "kariera@hsbc.com"
+        queue[1]["email"] = "malta_hrrecruitment@hsbc.com"
+        kept, skipped = daily_batch.dedupe_organizations(queue, {"dublinreception@hsbc.com"})
+        self.assertEqual([r["email"] for r in kept], [queue[2]["email"]])
+        self.assertEqual([reason for reason, _ in skipped],
+                         ["daha once bu kuruma gonderildi", "daha once bu kuruma gonderildi"])
+
+    def test_duplicate_within_the_list_keeps_the_first_only(self):
+        import daily_batch
+        queue = rows({"PL": 1, "MT": 1})
+        queue[0]["email"] = "kariera@hsbc.com"
+        queue[1]["email"] = "malta_hrrecruitment@hsbc.com"
+        kept, skipped = daily_batch.dedupe_organizations(queue, set())
+        self.assertEqual([r["email"] for r in kept], ["kariera@hsbc.com"])
+        self.assertEqual(skipped[0][0], "ayni kurum bu listede")
+        daily_batch.assert_unique_organizations(kept)
+
+    def test_shared_mail_providers_are_never_treated_as_one_organisation(self):
+        import daily_batch
+        queue = rows({"IE": 2})
+        queue[0]["email"] = "a@gmail.com"
+        queue[1]["email"] = "b@gmail.com"
+        kept, skipped = daily_batch.dedupe_organizations(queue, {"c@gmail.com"})
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(skipped, [])
+
+
 class CountryCampaignTests(unittest.TestCase):
     def test_sender_does_not_cross_failed_old_row_and_resumes_automatically(self):
         import daily_batch
