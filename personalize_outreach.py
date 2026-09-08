@@ -67,6 +67,26 @@ AREA_LABELS = {
 }
 
 SENIOR = ("senior", "staff", "principal", "lead ", "manager", "director", "head of", "vp ")
+# 8 Eyl 2026: "I noticed X's <job> opening" cumlesi firmanin HERHANGI bir ilanini
+# aliyordu; Rentman'a "Senior Frontend Developer", Alphatron'a "IT Solutions
+# Engineer" ilanini gordugumuzu yazdik. Finans basvurusunda yazilim ilanina atif
+# toplu mail izlenimi veriyor. Artik yalnizca profile uyan basliklar anilir;
+# uymuyorsa cumle genel gozleme duser.
+RELEVANT_ROLE_TERMS = (
+    "financ", "account", "bookkeep", "controller", "controlling", "audit", "tax",
+    "payroll", "treasury", "billing", "invoic", "credit control", "payable",
+    "receivable", "administrat", "admin", "office manager", "back office",
+    "reporting", "fp&a", "analyst", "compliance", "reconcil",
+    # Metin Excel/VBA ve Python ile surec otomasyonunu profilin parcasi olarak
+    # sunuyor; otomasyon/veri ilanlari bu yuzden anilabilir.
+    "automation", "data ",
+)
+
+
+def relevant_role(title: str) -> bool:
+    """Only openings a finance/administration candidate can plausibly apply to."""
+    low = title.casefold()
+    return any(term in low for term in RELEVANT_ROLE_TERMS)
 
 
 def _split(value: str, separator: str) -> list[str]:
@@ -80,7 +100,7 @@ def _country(row: dict[str, str]) -> str:
 
 
 def _best_job(row: dict[str, str]) -> str:
-    titles = _split(row.get("job_titles", ""), "|")
+    titles = [title for title in _split(row.get("job_titles", ""), "|") if relevant_role(title)]
     non_senior = [title for title in titles if not any(word in title.casefold() for word in SENIOR)]
     choice = (non_senior or titles)
     return choice[0][:90] if choice else ""

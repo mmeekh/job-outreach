@@ -40,9 +40,11 @@ class PersonalizationTests(unittest.TestCase):
         self.assertIn("around three years of experience in accounting and reporting", body)
         self.assertNotIn("Clemta", body)
         self.assertNotIn("Acun Media", body)
-        self.assertIn("Power BI", body)
+        self.assertIn("Excel-based reporting", body)
         self.assertIn("Excel/VBA and Python", body)
         self.assertIn("one long-term, full-time role", body)
+        self.assertIn("I consent to you keeping my CV on file", body)
+        self.assertIn("I would be happy to have a short introductory call", body)
         self.assertNotIn("proof of concept", body.casefold())
         self.assertEqual(body.count("I've also attached my CV for context."), 1)
 
@@ -59,6 +61,24 @@ class PersonalizationTests(unittest.TestCase):
         _subject, body = p.generate(row)
         self.assertIn("Data Analyst", body)
         self.assertNotIn("Senior Finance Manager", body)
+
+    def test_unrelated_openings_are_never_cited(self):
+        # 8 Eyl 2026: Rentman'a "Senior Frontend Developer", Alphatron'a
+        # "IT Solutions Engineer" ilanini gordugumuz yazilmisti.
+        row = sample_audit()
+        row["job_titles"] = "Senior Frontend Developer (Customer Lifecycle) | IT Solutions Engineer"
+        _subject, body = p.generate(row)
+        self.assertNotIn("Frontend", body)
+        self.assertNotIn("IT Solutions", body)
+        self.assertNotIn("I noticed", body)
+        self.assertIn("caught my attention", body)
+
+    def test_relevant_opening_is_still_cited(self):
+        row = sample_audit()
+        row["job_titles"] = "Backend Engineer | Junior Accountant | Accounts Payable Specialist"
+        _subject, body = p.generate(row)
+        self.assertIn("Junior Accountant", body)
+        self.assertNotIn("Backend", body)
 
 
 if __name__ == "__main__":
