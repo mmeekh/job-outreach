@@ -54,6 +54,27 @@ class OrganisationDedupeTests(unittest.TestCase):
         self.assertEqual(skipped, [])
 
 
+class TierTests(unittest.TestCase):
+    def test_posting_firms_first_small_offices_last_order_kept_within_tier(self):
+        from country_campaign import prioritise_rows, tier_of, TIER_POSTING, TIER_SMALL, TIER_OTHER
+        queue = rows({"IE": 4})
+        queue[0]["firma"] = "Murphy & Co Chartered Accountants"     # kucuk buro
+        queue[1]["firma"] = "Lendable Ltd"                           # diger
+        queue[2]["firma"] = "Bradan Accountants"                     # kucuk buro
+        queue[3]["firma"] = "Moniepoint"                             # ilanli
+        ordered = prioritise_rows(queue, {queue[3]["email"]})
+        self.assertEqual([r["firma"] for r in ordered],
+                         ["Moniepoint", "Lendable Ltd", "Murphy & Co Chartered Accountants", "Bradan Accountants"])
+        self.assertEqual(tier_of(queue[0], False), TIER_SMALL)
+        self.assertEqual(tier_of(queue[1], False), TIER_OTHER)
+        self.assertEqual(tier_of(queue[0], True), TIER_POSTING)   # ilan varsa buro olsa da one gecer
+
+    def test_sender_survives_missing_lead_database(self):
+        import daily_batch
+        with patch.object(daily_batch, "LEADS_DB", Path("/nonexistent/leads.sqlite3")):
+            self.assertEqual(daily_batch.posting_emails(rows({"IE": 2})), set())
+
+
 class CountryCampaignTests(unittest.TestCase):
     def test_sender_does_not_cross_failed_old_row_and_resumes_automatically(self):
         import daily_batch

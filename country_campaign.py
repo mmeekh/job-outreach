@@ -105,6 +105,37 @@ def claimed_counts(state, day, rows, *, cohort_only=False):
     return counts
 
 
+# 9 Eyl 2026 kullanici karari: gunluk parti once canli ve profile uygun ilani
+# olan firmalara, sonra digerlerine gitsin; kucuk buro/danismanlik en sona.
+# Olculen sebep: ATS kaynakli (ilanli) firmalarda sicak cevap %2,0, kucuk
+# burolarda %0,2 (8.093 mail). Siralama ulke agirliklarini bozmaz: her ulkenin
+# kuyrugu kendi icinde katmanlanir.
+SMALL_OFFICE_TERMS = (
+    "accountant", "accounting", "boekhoud", "administratie", "advies", "adviseur",
+    "belasting", "steuer", "tax", "bookkeep", "chartered", "& co", "and co", "partners",
+    "llp", "consultancy", "consulting", "kantoor", "fiscal", "fiscaal", "salaris",
+    "payroll", "bureau",
+)
+TIER_POSTING, TIER_OTHER, TIER_SMALL = 0, 1, 2
+TIER_LABELS = {TIER_POSTING: "ilanli", TIER_OTHER: "diger", TIER_SMALL: "kucuk buro"}
+
+
+def is_small_office(firm: str) -> bool:
+    low = (firm or "").casefold()
+    return any(term in low for term in SMALL_OFFICE_TERMS)
+
+
+def tier_of(row, has_posting: bool) -> int:
+    if has_posting:
+        return TIER_POSTING
+    return TIER_SMALL if is_small_office(row.get("firma", "")) else TIER_OTHER
+
+
+def prioritise_rows(rows, posting_emails: set[str]):
+    """Stable sort: posting firms first, small offices last; order within a tier kept."""
+    return sorted(rows, key=lambda row: tier_of(row, normalize_email(row.get("email", "")) in posting_emails))
+
+
 def balanced_batch(rows, claimed, limit):
     """Ulkeleri onaylanan yuzdelere gore, iki turda dagit.
 

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import random
+from collections import Counter
+import sqlite3
 import sys
 import time
+from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -24,12 +27,49 @@ from send_mails import (
 )
 from send_mails import SHARED_MAIL_PROVIDERS, assert_unique_organizations
 from campaign_pause import pause_status
-from country_campaign import DAILY_TOTAL, old_first_batch, claimed_counts, in_cohort
+from country_campaign import (DAILY_TOTAL, TIER_LABELS, old_first_batch, claimed_counts,
+                              in_cohort, prioritise_rows, tier_of)
 DAILY_LIMIT = 450
 NEW_CONTACT_DAILY_LIMIT = DAILY_LIMIT
 SEND_TIMEZONE = ZoneInfo("Europe/Istanbul")
 SEND_START_HOUR = 9
 SEND_END_HOUR = 20  # 31 Agu 2026: gunluk 400 hedefi 9 saatlik pencereye sigmiyordu
+
+
+LEADS_DB = Path("/root/projects/otomasyon-paneli/apps/personal-job-outreach/lead-scraper/leads.sqlite3")
+
+
+def posting_emails(rows: list[dict]) -> set[str]:
+    """Adresleri, lead veritabaninda profile uygun canli ilani olan firmalara esle.
+
+    Kuyruk dosyasi ilan bilgisi tasimaz; okunur modda lead veritabanina bakilir.
+    Veritabani yoksa ya da okunamazsa bos kume doner ve parti eski sirayla gider:
+    onceliklendirme gonderimi asla durdurmamali.
+    """
+    try:
+        from personalize_outreach import relevant_role
+    except ImportError:
+        return set()
+    emails = [normalize_email(row.get("email", "")) for row in rows]
+    found: set[str] = set()
+    try:
+        conn = sqlite3.connect(f"file:{LEADS_DB}?mode=ro", uri=True, timeout=10)
+        try:
+            for start in range(0, len(emails), 400):
+                chunk = [e for e in emails[start:start + 400] if e]
+                if not chunk:
+                    continue
+                marks = ",".join("?" for _ in chunk)
+                for email, titles in conn.execute(
+                    f"SELECT lower(email), job_titles FROM leads WHERE lower(email) IN ({marks})", chunk
+                ):
+                    if any(relevant_role(t.strip()) for t in (titles or "").split("|") if t.strip()):
+                        found.add(email)
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        print(f"ilan onceligi atlandi (lead DB okunamadi: {exc})", flush=True)
+    return found
 
 
 def corporate_domain(email: str) -> str:
@@ -121,8 +161,14 @@ def main() -> None:
                 renderable, skipped = dedupe_organizations(renderable, attempted)
                 for reason, row in skipped:
                     print(f"ATLANDI-AYNI-KURUM: {row['firma']} <{row['email']}> ({reason})")
+                # Canli ilani olan firmalar one, kucuk burolar sona; Turk-oncelik
+                # sirasi katman icinde korunur (sorted kararlidir).
+                with_posting = posting_emails(renderable)
+                renderable = prioritise_rows(renderable, with_posting)
                 country_claims = claimed_counts(state, today, rows, cohort_only=True)
                 todo = old_first_batch(renderable, country_claims, remaining_new)
+                tiers = Counter(TIER_LABELS[tier_of(row, normalize_email(row["email"]) in with_posting)] for row in todo)
+                print(f"PARTI KATMANLARI: {dict(tiers)} (kuyrukta ilanli {len(with_posting)})", flush=True)
                 old_pending = {normalize_email(row["email"]) for row in renderable if not in_cohort(row)}
                 # Ayikladiktan sonra bu bir degismez: hala cakisma varsa gercek bir hata.
                 assert_unique_organizations(todo)
