@@ -108,6 +108,8 @@ def row_problem(audit: dict[str, str], personalized: dict[str, str] | None) -> s
         return "invalid email"
     if not audit.get("firma", "").strip() or not host(audit.get("site", "")):
         return "missing company or website"
+    if re.fullmatch(r"Q\d{4,}", audit["firma"].strip()):
+        return "company name is a Wikidata id"
     if not is_https(audit.get("email_source_url", "")):
         return "email source is not HTTPS"
     tag = audit.get("oncelik", "").strip().upper()
