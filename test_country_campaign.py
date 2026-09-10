@@ -111,7 +111,18 @@ class CountryCampaignTests(unittest.TestCase):
                 calls.clear()
                 with patch.object(daily_batch, "send_row", fake_send):
                     daily_batch.main()
-                    self.assertEqual(calls, [old] + new)
+                    # Eski satir once gider; kohortun tamami da gider. Kohort ICI
+                    # sirasi agirliga baglidir (10 Eyl 2026: agirligi olmayan
+                    # ulkeler ikinci tura dustu), o yuzden sira degil kume
+                    # karsilastirilir; sadece "eski once" degismezi korunur.
+                    self.assertEqual(calls[0], old)
+                    self.assertEqual({r["email"] for r in calls}, {r["email"] for r in [old] + new})
+                    weighted = [i for i, r in enumerate(calls)
+                                if route_for(r)[0] in WEIGHTS and r is not old]
+                    unweighted = [i for i, r in enumerate(calls)
+                                  if route_for(r)[0] not in WEIGHTS and r is not old]
+                    if weighted and unweighted:
+                        self.assertLess(max(weighted), min(unweighted))
                     calls.clear()
                     daily_batch.main()
                     self.assertEqual(calls, [])

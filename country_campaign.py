@@ -34,8 +34,17 @@ COUNTRIES = ("GB", "IE", "PL", "NL", "PT", "MT", "FI", "SE", "NO",
 #   PT  6 - Lizbon/Porto servis merkezi buyumesi, calisma dili Ingilizce
 #   MT  4 - Ingilizce resmi dil, finans/denetim agirlikli
 #   FI/SE/NO 5 - cok yuksek Ingilizce, temiz havuzlar; derinlige gore bolundu
-WEIGHTS = {"GB": 35, "IE": 20, "PL": 15, "NL": 15, "PT": 6, "MT": 4,
-           "FI": 3, "SE": 1, "NO": 1}
+# 10 Eyl 2026 yeniden dengeleme, 7.900 gonderim uzerinden olculdu.
+# Sicak cevap orani ve dil duvari (ulke basina):
+#   GB %0,86 - 0 dil reddi (ana dil Ingilizce + 12.696 lisansli sponsor havuzu)
+#   PL %0,86 - 1 dil reddi, sadece 348 mail gitmis: en az kullanilan iyi kaynak
+#   IE %0,58 - 0 dil reddi
+#   NL %0,62 ama 12 "Hollandaca sart" + 4 "burada ikamet sart" reddi; en cok
+#             cevap veren ulke (%7,1) oldugu icin tamamen kapatilmadi, kisildi
+#   FI %1,89 - umut verici ama yalnizca 53 mail; gercek orneklem icin artirildi
+#   PT 43 mailde SIFIR cevap; MT 40 mailde 2 cevap 0 sicak -> ikisi de asgariye
+WEIGHTS = {"GB": 40, "PL": 25, "IE": 20, "NL": 8, "FI": 4,
+           "PT": 1, "SE": 1, "NO": 1}
 # Agirligi buyuk olan once arastirilir. Ayri bir sira listesi TUTULMAZ:
 # 6-7 Eyl gecesi orkestratordeki RESEARCH_ORDER bu kumeyle uyusmuyordu
 # (MT yoktu, kapatilan CH/AT/BE vardi) ve `.index()` ValueError firlatip
