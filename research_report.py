@@ -90,9 +90,13 @@ def night_output(since: datetime) -> tuple[dict[str, tuple[int, int]], int]:
         ):
             per_country[country or "?"] = (processed, qualified or 0)
         last = _last_rowid()
+        # jobfind ayni veritabanina Alman firmalarini yaziyor (source 'jobfind:*');
+        # 11 Eyl: rapor 37.705 "yeni lead" yazdi, neredeyse hepsi jobfind'di.
         new_leads, max_rowid = conn.execute(
-            "SELECT COUNT(*), COALESCE(MAX(rowid), ?) FROM leads WHERE rowid > ?", (last, last),
+            "SELECT COUNT(*), COALESCE(MAX(rowid), ?) FROM leads "
+            "WHERE rowid > ? AND (source IS NULL OR source NOT LIKE 'jobfind:%')", (last, last),
         ).fetchone()
+        max_rowid = conn.execute("SELECT COALESCE(MAX(rowid), ?) FROM leads", (last,)).fetchone()[0]
         night_output.max_rowid = int(max_rowid or 0)  # type: ignore[attr-defined]
         return per_country, new_leads
     finally:
